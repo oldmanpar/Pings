@@ -476,6 +476,7 @@ namespace Pings
         {
             // 1. 既に監視が開始されていたら、一度停止させる（再開時の安全策）
             StopMonitoring();
+            ClearVeiw();
 
             // 2. DataGridViewの編集内容を確定
             // ユーザーがアドレスを入力中だった場合、この操作でリストに反映される
@@ -492,6 +493,7 @@ namespace Pings
                 _nextIndex = 1;
             }
 
+
             // 4. Ping監視の開始
             StartMonitoring();
         }
@@ -504,22 +506,17 @@ namespace Pings
         private void BtnClear_Click(object sender, EventArgs e)
         {
             StopMonitoring();
+            ClearVeiw();
 
-            foreach (var item in monitorList)
+            if (btnPingStart != null)
             {
-                item.ResetStatistics();
+                btnPingStart.Enabled = true; // 有効化
             }
 
-            disruptionLogList.Clear();
-
-            txtStartTime.Text = "";
-            txtEndTime.Text = "";
-
-            monitorList.ResetBindings();
-            UpdateUiState("Initial");
-
-            // ログのソートインジケータもリセット
-            ResetLogSortIndicators();
+            if (dgvMonitor != null)
+            {
+                dgvMonitor.AllowUserToDeleteRows = true;
+            }
         }
 
         private void ResetLogSortIndicators()
@@ -874,6 +871,12 @@ namespace Pings
                     }
                 }
             }
+
+
+            if (btnPingStart != null)
+            {
+                btnPingStart.Enabled = true; // 有効化
+            }
         }
 
 
@@ -927,6 +930,11 @@ namespace Pings
                 item.ResetStatistics();
                 Task.Run(() => RunPingLoopAsync(item, cts.Token, logAction));
             }
+
+            if (dgvMonitor != null)
+            {
+                dgvMonitor.AllowUserToDeleteRows = false;
+            }
         }
 
         private void StopMonitoring()
@@ -939,7 +947,31 @@ namespace Pings
                 cts = null;
                 txtEndTime.Text = DateTime.Now.ToString("yyyy/MM/dd HH:mm:ss");
                 UpdateUiState("Stopped");
+                
+                if (btnPingStart != null)
+                {
+                    btnPingStart.Enabled = false; // 無効化 (グレーアウト)
+                }
             }
+        }
+
+        private void ClearVeiw()
+        {
+            foreach (var item in monitorList)
+            {
+                item.ResetStatistics();
+            }
+
+            disruptionLogList.Clear();
+
+            txtStartTime.Text = "";
+            txtEndTime.Text = "";
+
+            monitorList.ResetBindings();
+            UpdateUiState("Initial");
+
+            // ログのソートインジケータもリセット
+            ResetLogSortIndicators();
         }
 
         private async Task RunPingLoopAsync(PingMonitorItem item, CancellationToken token, Action<DisruptionLogItem> logAction)
@@ -1038,7 +1070,9 @@ namespace Pings
                 ReadOnly = true,
                 BackgroundColor = SystemColors.ControlLightLight,
                 RowHeadersVisible = false,
-                SelectionMode = DataGridViewSelectionMode.FullRowSelect
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+                AllowUserToDeleteRows = false,
+                AllowUserToAddRows = false
             };
             logPage.Controls.Add(dgvLog);
             tabControl.Controls.Add(logPage);
