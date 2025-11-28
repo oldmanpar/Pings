@@ -972,7 +972,7 @@ namespace Pings
         {
             this.Text = "Pings B版";
             this.Size = new Size(1300, 600); // 画面サイズを広めに設定
-            this.MinimumSize = new Size(900, 400);
+            // this.MinimumSize = new Size(900, 400);
             this.StartPosition = FormStartPosition.CenterScreen;
 
             // UI更新タイマーの初期化
@@ -981,7 +981,7 @@ namespace Pings
             uiUpdateTimer.Tick += UiUpdateTimer_Tick;
 
             // 上部パネル (日時、設定)
-            Panel topPanel = new Panel { Dock = DockStyle.Top, Height = 65, Padding = new Padding(10) };
+            Panel topPanel = new Panel { Dock = DockStyle.Top, Height = 50, Padding = new Padding(10) };
             this.Controls.Add(topPanel);
 
             // 開始日時/終了日時
