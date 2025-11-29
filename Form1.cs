@@ -1215,7 +1215,7 @@ namespace Pings
             // ログのソートインジケータもリセット
             ResetLogSortIndicators();
 
-            // Traceroute 関連もクリア
+            // Traceroute 関連もクリア（ユーザーが明示的にクリア/保存したときのみ呼ばれる想定）
             tracerouteTextBoxes?.Clear();
             if (traceroutePanel != null)
             {
@@ -1580,55 +1580,70 @@ namespace Pings
             _isTracerouteRunning = true;
             UpdateTracerouteButtons();
 
-            // Tracerouteタブを選択して出力をクリアし、列ごとに TextBox を作成
+            // Tracerouteタブを選択
             tabControl.SelectedTab = traceroutePage;
-            tracerouteTextBoxes.Clear();
-            traceroutePanel.Controls.Clear();
 
-            // 列数を targets.Count に設定
-            int colCount = Math.Max(1, targets.Count);
-            traceroutePanel.ColumnCount = colCount;
-            traceroutePanel.RowCount = 1;
-            traceroutePanel.ColumnStyles.Clear();
-            for (int i = 0; i < colCount; i++)
+            // Determine whether to reuse existing textboxes (append) or recreate (clear)
+            bool reuseExisting = tracerouteTextBoxes != null
+                && tracerouteTextBoxes.Count > 0
+                && tracerouteTextBoxes.Count == targets.Count
+                && targets.All(t => tracerouteTextBoxes.ContainsKey(t));
+
+            if (!reuseExisting)
             {
-                traceroutePanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / colCount));
+                // Clear and create new layout if targets differ
+                tracerouteTextBoxes.Clear();
+                traceroutePanel.Controls.Clear();
+
+                // 列数を targets.Count に設定
+                int colCount = Math.Max(1, targets.Count);
+                traceroutePanel.ColumnCount = colCount;
+                traceroutePanel.RowCount = 1;
+                traceroutePanel.ColumnStyles.Clear();
+                for (int i = 0; i < colCount; i++)
+                {
+                    traceroutePanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / colCount));
+                }
+
+                // 各ターゲットに対して縦にラベル + TextBox を作る
+                for (int i = 0; i < targets.Count; i++)
+                {
+                    string address = targets[i];
+
+                    var container = new Panel { Dock = DockStyle.Fill, Padding = new Padding(2) };
+
+                    var lbl = new Label
+                    {
+                        Text = address,
+                        Dock = DockStyle.Top,
+                        Height = 18,
+                        TextAlign = ContentAlignment.MiddleLeft,
+                        AutoEllipsis = true
+                    };
+
+                    var tb = new TextBox
+                    {
+                        Multiline = true,
+                        ReadOnly = true,
+                        ScrollBars = ScrollBars.Both,
+                        Font = new Font(FontFamily.GenericMonospace, 9f),
+                        Dock = DockStyle.Fill,
+                        BackColor = SystemColors.Window
+                    };
+
+                    container.Controls.Add(tb);
+                    container.Controls.Add(lbl);
+
+                    traceroutePanel.Controls.Add(container, i, 0);
+                    tracerouteTextBoxes[address] = tb;
+                }
+            }
+            else
+            {
+                // reuse existing: just add header line to each targeted box
             }
 
-            // 各ターゲットに対して縦にラベル + TextBox を作る
-            for (int i = 0; i < targets.Count; i++)
-            {
-                string address = targets[i];
-
-                var container = new Panel { Dock = DockStyle.Fill, Padding = new Padding(2) };
-
-                var lbl = new Label
-                {
-                    Text = address,
-                    Dock = DockStyle.Top,
-                    Height = 18,
-                    TextAlign = ContentAlignment.MiddleLeft,
-                    AutoEllipsis = true
-                };
-
-                var tb = new TextBox
-                {
-                    Multiline = true,
-                    ReadOnly = true,
-                    ScrollBars = ScrollBars.Both,
-                    Font = new Font(FontFamily.GenericMonospace, 9f),
-                    Dock = DockStyle.Fill,
-                    BackColor = SystemColors.Window
-                };
-
-                container.Controls.Add(tb);
-                container.Controls.Add(lbl);
-
-                traceroutePanel.Controls.Add(container, i, 0);
-                tracerouteTextBoxes[address] = tb;
-            }
-
-            // 共通ヘッダ（全列に表示）を出力
+            // 共通ヘッダ（全列に表示）を出力 — 既存の結果が残っている場合は追記される
             AppendTracerouteOutputToAll($"== Traceroute: {DateTime.Now:yyyy/MM/dd HH:mm:ss} ==\r\n", true);
 
             // Traceroute専用 CTS（Ping の cts と連動させるが独立してキャンセル可能）
@@ -1637,14 +1652,15 @@ namespace Pings
 
             var token = tracerouteCts.Token;
 
+            bool wasCanceled = false;
+
             try
             {
                 await RunTracerouteForAddressesAsync(targets, token);
-                AppendTracerouteOutputToAll("=== Traceroute 完了 ===\r\n\r\n", true);
             }
             catch (OperationCanceledException)
             {
-                AppendTracerouteOutputToAll("=== Traceroute はキャンセルされました ===\r\n\r\n", true);
+                wasCanceled = true;
             }
             catch (Exception ex)
             {
@@ -1652,6 +1668,18 @@ namespace Pings
             }
             finally
             {
+                // If token was requested to cancel (by Stop button), treat as "途中停止"
+                if (tracerouteCts != null && tracerouteCts.IsCancellationRequested) wasCanceled = true;
+
+                if (wasCanceled)
+                {
+                    AppendTracerouteOutputToAll("=== Tracerouteは途中で停止されました。 ===\r\n\r\n", true);
+                }
+                else
+                {
+                    AppendTracerouteOutputToAll("=== Traceroute 完了 ===\r\n\r\n", true);
+                }
+
                 // 実行終了後にフラグを戻してボタンを更新
                 _isTracerouteRunning = false;
                 UpdateTracerouteButtons();
@@ -1694,7 +1722,7 @@ namespace Pings
 
             string arguments = $"-d -w {tryTimeoutMs} {address}";
 
-            // 各アドレスごとに見出し行をセット
+            // 各アドレスごとに見出し行をセット（追記）
             AppendTracerouteOutput(address, $"--- tracert {address} (timeout={tryTimeoutMs}ms) ---\r\n", true);
 
             var psi = new ProcessStartInfo
@@ -1849,38 +1877,71 @@ namespace Pings
 
         private void BtnSaveTraceroute_Click(object sender, EventArgs e)
         {
-            using (SaveFileDialog sfd = new SaveFileDialog())
+            if (tracerouteTextBoxes == null || tracerouteTextBoxes.Count == 0)
             {
-                sfd.Filter = "テキストファイル (*.txt)|*.txt|すべてのファイル (*.*)|*.*";
-                sfd.Title = "Traceroute 出力を保存";
-                sfd.FileName = $"Traceroute_{DateTime.Now:yyyyMMdd_HHmmss}.txt";
+                MessageBox.Show("保存するTraceroute結果がありません。", "保存不可", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
 
-                if (sfd.ShowDialog() == DialogResult.OK)
+            // ユーザーに保存先フォルダを選ばせる（複数ファイルを作成するため）
+            using (var fbd = new FolderBrowserDialog())
+            {
+                fbd.Description = "Traceroute結果の保存先フォルダを選択してください。";
+                if (fbd.ShowDialog() != DialogResult.OK) return;
+
+                string folder = fbd.SelectedPath;
+                try
                 {
-                    try
+                    // 各対象アドレスごとにファイルを作成（追記モード）。ファイル名に使えない文字は置換。
+                    foreach (var kv in tracerouteTextBoxes)
                     {
-                        // 複数列分を1つのテキストにまとめて保存（各ターゲット毎に見出しを付ける）
-                        using (var sw = new StreamWriter(sfd.FileName, false, System.Text.Encoding.GetEncoding(932)))
+                        string address = kv.Key;
+                        string content = kv.Value.Text;
+                        if (string.IsNullOrEmpty(content)) continue;
+
+                        string safe = SanitizeFileName(address);
+                        string fileName = Path.Combine(folder, $"Traceroute_Resurt_({safe}).txt");
+
+                        // 追記で保存（指定どおり: 既存があれば追記）
+                        using (var sw = new StreamWriter(fileName, true, System.Text.Encoding.GetEncoding(932)))
                         {
-                            if (tracerouteTextBoxes != null && tracerouteTextBoxes.Count > 0)
-                            {
-                                foreach (var kv in tracerouteTextBoxes)
-                                {
-                                    sw.WriteLine($"--- {kv.Key} ---");
-                                    sw.WriteLine(kv.Value.Text);
-                                    sw.WriteLine();
-                                }
-                            }
+                            sw.WriteLine($"== Traceroute saved: {DateTime.Now:yyyy/MM/dd HH:mm:ss} ==");
+                            sw.WriteLine(content);
+                            sw.WriteLine();
                         }
 
-                        MessageBox.Show("Traceroute 出力をファイルに保存しました。", "保存完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        // 保存後は画面上の該当TextBoxをクリア
+                        if (kv.Value.InvokeRequired)
+                        {
+                            kv.Value.Invoke(new Action(() => kv.Value.Clear()));
+                        }
+                        else
+                        {
+                            kv.Value.Clear();
+                        }
                     }
-                    catch (Exception ex)
-                    {
-                        MessageBox.Show($"ファイルの保存中にエラーが発生しました:\n{ex.Message}", "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    }
+
+                    MessageBox.Show("Traceroute 出力をフォルダに保存しました（各対象ごとにファイルを作成/追記）。", "保存完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"ファイルの保存中にエラーが発生しました:\n{ex.Message}", "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
+
+            // 保存後はボタン状態を更新（表示をクリアしているため Save は無効化される）
+            UpdateTracerouteButtons();
+        }
+
+        // helper: ファイル名に使えない文字を安全に置換
+        private string SanitizeFileName(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return "unknown";
+            var invalid = Path.GetInvalidFileNameChars();
+            var s = new string(name.Select(ch => invalid.Contains(ch) ? '_' : ch).ToArray());
+            // さらに長すぎる場合は短縮
+            if (s.Length > 120) s = s.Substring(0, 120);
+            return s;
         }
 
         // 追加: チェックボックスの即時反映用イベント（編集状態をコミットして CellValueChanged を発火させる）
@@ -1942,7 +2003,8 @@ namespace Pings
                 }
                 catch { }
             }
-            // すぐに UI を更新
+
+            // UIはすぐに更新するが、実際の終了判定は BtnTraceroute の finally で行う
             _isTracerouteRunning = false;
             UpdateTracerouteButtons();
         }
