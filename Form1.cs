@@ -982,115 +982,105 @@ namespace Pings
                 return;
             }
 
-            // デフォルトファイル名は要求通り "Ping_Result_yyyymmdd.log"
-            using (SaveFileDialog sfd = new SaveFileDialog())
+            // 実行ファイルと同じフォルダへ保存（ダイアログは表示しない）
+            string folder = AppDomain.CurrentDomain.BaseDirectory;
+            string filePath = Path.Combine(folder, $"Ping_Result_{DateTime.Now:yyyyMMdd}.csv");
+
+            try
             {
-                sfd.FileName = $"Ping_Result_{DateTime.Now:yyyyMMdd}.log";
-                sfd.Filter = "ログファイル (*.log)|*.log|すべてのファイル (*.*)|*.*";
-                sfd.Title = "監視結果を保存";
-                sfd.DefaultExt = "log";
-                sfd.AddExtension = true;
-
-                if (sfd.ShowDialog() == DialogResult.OK)
+                // 追記モードで保存（再実行時は追記される）
+                // Shift-JIS (Encoding.GetEncoding(932)) でファイルに書き込みます。
+                using (StreamWriter sw = new StreamWriter(filePath, true, System.Text.Encoding.GetEncoding(932)))
                 {
-                    try
+                    // 区切りヘッダ（追記したときに分かりやすくする）
+                    sw.WriteLine("================================================================");
+                    sw.WriteLine($"Saved: {DateTime.Now:yyyy/MM/dd HH:mm:ss}");
+                    sw.WriteLine();
+
+                    // --- 1. ヘッダー情報 ---
+                    sw.WriteLine($"開始日時　：　{txtStartTime.Text}");
+                    sw.WriteLine($"終了日時　：　{txtEndTime.Text}");
+                    sw.WriteLine($"送信間隔　：　{cmbInterval.Text} [ms]     タイムアウト　：　{cmbTimeout.Text} [ms]");
+                    sw.WriteLine(); // 空行
+
+                    // --- 2. 監視統計データ (dgvMonitorの内容) ---
+                    sw.WriteLine("--- 監視統計 ---");
+
+                    // ヘッダー行
+                    string header = "ｽﾃｰﾀｽ,順番,対象アドレス,Host名,送信回数,失敗回数,連続失敗回数,連続失敗時間[hh:mm:ss],最大失敗時間[hh:mm:ss],時間[ms],平均値[ms],最小値[ms],最大値[ms]";
+                    sw.WriteLine(header);
+
+                    // データ行
+                    foreach (var item in monitorList.OrderBy(i => i.順番))
                     {
-                        // 追記モードで保存（再実行時は追記される）
-                        // Shift-JIS (Encoding.GetEncoding(932)) でファイルに書き込みます。
-                        using (StreamWriter sw = new StreamWriter(sfd.FileName, true, System.Text.Encoding.GetEncoding(932)))
+                        string line = string.Join(",",
+                            item.ステータス,
+                            item.順番,
+                            item.対象アドレス,
+                            item.Host名,
+                            item.送信回数,
+                            item.失敗回数,
+                            item.連続失敗回数,
+                            item.連続失敗時間s,
+                            item.最大失敗時間s,
+                            item.時間ms,
+                            // 平均値はF1形式で出力
+                            $"{item.平均値ms:F1}",
+                            item.最小値ms,
+                            item.最大値ms
+                        );
+                        sw.WriteLine(line);
+                    }
+
+                    sw.WriteLine(); // 空行
+                    sw.WriteLine(); // 空行
+
+                    // --- 3. 障害イベントログデータ (dgvLogの内容) ---
+                    sw.WriteLine("--- 障害イベントログ ---");
+
+                    if (disruptionLogList.Any())
+                    {
+                        // ヘッダー行（失敗回数を追加）
+                        string logHeader = "対象アドレス,Host名,Down開始日時,復旧日時,失敗回数,失敗時間[hh:mm:ss]," +
+                                           "Down前平均[ms],Down前最小[ms],Down前最大[ms]," +
+                                           "復旧後平均[ms],復旧後最小[ms],復旧後最大[ms]";
+                        sw.WriteLine(logHeader);
+
+                        // データ行 (常に復旧日時でソートして書き出す)
+                        foreach (var logItem in disruptionLogList.OrderBy(i => i.復旧日時))
                         {
-                            // 区切りヘッダ（追記したときに分かりやすくする）
-                            sw.WriteLine("================================================================");
-                            sw.WriteLine($"Saved: {DateTime.Now:yyyy/MM/dd HH:mm:ss}");
-                            sw.WriteLine();
-
-                            // --- 1. ヘッダー情報 ---
-                            sw.WriteLine($"開始日時　：　{txtStartTime.Text}");
-                            sw.WriteLine($"終了日時　：　{txtEndTime.Text}");
-                            sw.WriteLine($"送信間隔　：　{cmbInterval.Text} [ms]     タイムアウト　：　{cmbTimeout.Text} [ms]");
-                            sw.WriteLine(); // 空行
-
-                            // --- 2. 監視統計データ (dgvMonitorの内容) ---
-                            sw.WriteLine("--- 監視統計 ---");
-
-                            // ヘッダー行
-                            string header = "ｽﾃｰﾀｽ,順番,対象アドレス,Host名,送信回数,失敗回数,連続失敗回数,連続失敗時間[hh:mm:ss],最大失敗時間[hh:mm:ss],時間[ms],平均値[ms],最小値[ms],最大値[ms]";
-                            sw.WriteLine(header);
-
-                            // データ行
-                            foreach (var item in monitorList.OrderBy(i => i.順番))
-                            {
-                                string line = string.Join(",",
-                                    item.ステータス,
-                                    item.順番,
-                                    item.対象アドレス,
-                                    item.Host名,
-                                    item.送信回数,
-                                    item.失敗回数,
-                                    item.連続失敗回数,
-                                    item.連続失敗時間s,
-                                    item.最大失敗時間s,
-                                    item.時間ms,
-                                    // 平均値はF1形式で出力
-                                    $"{item.平均値ms:F1}",
-                                    item.最小値ms,
-                                    item.最大値ms
-                                );
-                                sw.WriteLine(line);
-                            }
-
-                            sw.WriteLine(); // 空行
-                            sw.WriteLine(); // 空行
-
-                            // --- 3. 障害イベントログデータ (dgvLogの内容) ---
-                            sw.WriteLine("--- 障害イベントログ ---");
-
-                            if (disruptionLogList.Any())
-                            {
-                                // ヘッダー行（失敗回数を追加）
-                                string logHeader = "対象アドレス,Host名,Down開始日時,復旧日時,失敗回数,失敗時間[hh:mm:ss]," +
-                                                   "Down前平均[ms],Down前最小[ms],Down前最大[ms]," +
-                                                   "復旧後平均[ms],復旧後最小[ms],復旧後最大[ms]";
-                                sw.WriteLine(logHeader);
-
-                                // データ行 (常に復旧日時でソートして書き出す)
-                                foreach (var logItem in disruptionLogList.OrderBy(i => i.復旧日時))
-                                {
-                                    string logLine = string.Join(",",
-                                        logItem.対象アドレス,
-                                        logItem.Host名,
-                                        logItem.Down開始日時.ToString("yyyy/MM/dd HH:mm:ss"),
-                                        logItem.復旧日時.ToString("yyyy/MM/dd HH:mm:ss"),
-                                        logItem.失敗回数,
-                                        logItem.失敗時間mmss,
-                                        // 平均値はF1形式で出力
-                                        $"{logItem.Down前平均ms:F1}",
-                                        logItem.Down前最小ms,
-                                        logItem.Down前最大ms,
-                                        $"{logItem.復旧後平均ms:F1}",
-                                        logItem.復旧後最小ms,
-                                        logItem.復旧後最大ms
-                                    );
-                                    sw.WriteLine(logLine);
-                                }
-                            }
-                            else
-                            {
-                                sw.WriteLine("障害イベントは記録されていません。");
-                            }
-
-                            sw.WriteLine(); // 終端改行
+                            string logLine = string.Join(",",
+                                logItem.対象アドレス,
+                                logItem.Host名,
+                                logItem.Down開始日時.ToString("yyyy/MM/dd HH:mm:ss"),
+                                logItem.復旧日時.ToString("yyyy/MM/dd HH:mm:ss"),
+                                logItem.失敗回数,
+                                logItem.失敗時間mmss,
+                                // 平均値はF1形式で出力
+                                $"{logItem.Down前平均ms:F1}",
+                                logItem.Down前最小ms,
+                                logItem.Down前最大ms,
+                                $"{logItem.復旧後平均ms:F1}",
+                                logItem.復旧後最小ms,
+                                logItem.復旧後最大ms
+                            );
+                            sw.WriteLine(logLine);
                         }
-
-                        MessageBox.Show("監視結果をログファイルに保存しました（追記モード）。", "保存完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     }
-                    catch (Exception ex)
+                    else
                     {
-                        MessageBox.Show($"ファイルの保存中にエラーが発生しました:\n{ex.Message}", "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        sw.WriteLine("障害イベントは記録されていません。");
                     }
-                }
-            }
 
+                    sw.WriteLine(); // 終端改行
+                }
+
+                MessageBox.Show($"監視結果をファイルに保存しました（追記モード）：\n{filePath}", "保存完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"ファイルの保存中にエラーが発生しました:\n{ex.Message}", "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
 
             if (btnPingStart != null)
             {
