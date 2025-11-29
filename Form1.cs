@@ -392,6 +392,7 @@ namespace Pings
         private SemaphoreSlim tracerouteSemaphore = new SemaphoreSlim(4); // 追加: 同時実行制限（任意で調整）
 
         private Button btnSaveTraceroute; // 追加: Traceroute 出力保存ボタン
+        private Button btnClearTraceroute; // 追加: Traceroute 出力クリアボタン
 
         // 追加: フィールド（他の private フィールド群の近く）
         private volatile bool _isTracerouteRunning = false;
@@ -521,7 +522,7 @@ namespace Pings
         // 変更済: Traceroute ボタン状態更新メソッド
         private void UpdateTracerouteButtons()
         {
-            if (btnTraceroute == null || btnSaveTraceroute == null) return;
+            if (btnTraceroute == null || btnSaveTraceroute == null || btnClearTraceroute == null) return;
 
             if (this.InvokeRequired)
             {
@@ -529,12 +530,14 @@ namespace Pings
                 return;
             }
 
-            // Ping 実行状態に依存しないように変更:
+            // Traceroute 実行は Trace チェックが一つでもあれば有効（Ping 実行有無に依存しない）
             bool hasCheckedTrace = (monitorList != null) && monitorList.Any(i => i.Trace && !string.IsNullOrWhiteSpace(i.対象アドレス));
             btnTraceroute.Enabled = hasCheckedTrace && !_isTracerouteRunning;
 
+            // Traceroute 出力の有無で保存/クリアを制御（実行中は無効）
             bool hasTracerouteOutput = !string.IsNullOrEmpty(txtTracerouteOutput?.Text);
             btnSaveTraceroute.Enabled = !_isTracerouteRunning && hasTracerouteOutput;
+            btnClearTraceroute.Enabled = !_isTracerouteRunning && hasTracerouteOutput; // 追加
         }
 
         private void SetupMenuStrip()
@@ -1320,6 +1323,7 @@ namespace Pings
             btnSave = new Button { Text = "Ping結果保存", Location = new Point(280, 5), Width = 110 };
             btnTraceroute = new Button { Text = "Traceroute実行", Location = new Point(400, 5), Width = 120 };
             btnSaveTraceroute = new Button { Text = "Traceroute保存", Location = new Point(530, 5), Width = 120 };
+            btnClearTraceroute = new Button { Text = "Tracerouteクリア", Location = new Point(660, 5), Width = 110 };
             btnExit = new Button { Text = "終了", Location = new Point(this.ClientSize.Width - 90, 5), Width = 80, Anchor = AnchorStyles.Right };
 
             bottomPanel.Controls.Add(btnPingStart);
@@ -1328,6 +1332,7 @@ namespace Pings
             bottomPanel.Controls.Add(btnSave);
             bottomPanel.Controls.Add(btnTraceroute);
             bottomPanel.Controls.Add(btnSaveTraceroute);
+            bottomPanel.Controls.Add(btnClearTraceroute); // 追加
             bottomPanel.Controls.Add(btnExit);
 
             // add to form
@@ -1347,6 +1352,8 @@ namespace Pings
             btnSave.Click += BtnSaveResult_Click;
             btnTraceroute.Click += BtnTraceroute_Click;
             btnSaveTraceroute.Click += BtnSaveTraceroute_Click;
+            btnClearTraceroute.Click += BtnClearTraceroute_Click;
+
 
             // ensure menu spacing
             int menuHeight = 0;
@@ -1743,6 +1750,27 @@ namespace Pings
             {
                 UpdateTracerouteButtons();
             }
+        }
+
+        // 追加: Trace結果クリアの実装
+        private void BtnClearTraceroute_Click(object sender, EventArgs e)
+        {
+            if (txtTracerouteOutput == null) return;
+
+            // UI スレッド上で安全にクリア
+            if (txtTracerouteOutput.InvokeRequired)
+            {
+                txtTracerouteOutput.Invoke(new Action(() => {
+                    txtTracerouteOutput.Clear();
+                }));
+            }
+            else
+            {
+                txtTracerouteOutput.Clear();
+            }
+
+            // ボタン状態更新
+            UpdateTracerouteButtons();
         }
         // ---------------------------------------------------------------
         // （既存の他メソッド、フィールドはそのまま）
