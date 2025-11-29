@@ -435,6 +435,9 @@ namespace Pings
         // ユーザーによって停止メッセージを既に挿入したかを保持
         private ConcurrentDictionary<string, bool> _tracerouteStoppedByUser;
 
+        // 追加: Ping停止後の編集許可制御フラグ
+        private bool _allowEditAfterStop = true;
+
         public Form1()
         {
             // ★修正箇所: デザイナー生成コードを呼び出す★
@@ -514,11 +517,22 @@ namespace Pings
                 }
                 else // Stopped
                 {
-                    // Stopped: 編集可能に戻す（初期状態と同様）
-                    if (col.DataPropertyName == "対象アドレス" || col.DataPropertyName == "Host名" || col.DataPropertyName == "Trace")
+                    // 変更: Ping停止後は対象アドレス/Host名を編集不可にする（ただし
+                    //       _allowEditAfterStop が true の場合のみ編集可とする）
+                    if (col.DataPropertyName == "Trace")
+                    {
+                        // Trace 列は Stopped 時も切替可能（従来仕様維持）
                         col.ReadOnly = false;
+                    }
+                    else if (col.DataPropertyName == "対象アドレス" || col.DataPropertyName == "Host名")
+                    {
+                        // Stop直後は編集不可。Ping結果保存またはPing結果クリアで許可される。
+                        col.ReadOnly = !_allowEditAfterStop;
+                    }
                     else
+                    {
                         col.ReadOnly = true;
+                    }
                 }
             }
 
@@ -550,6 +564,7 @@ namespace Pings
                 case "Stopped":
                     btnPingStart.Enabled = true;
                     btnStop.Enabled = false;
+                    // Ping停止直後はクリア/保存を有効にし、編集許可は _allowEditAfterStop で制御
                     btnClear.Enabled = true;
                     btnSave.Enabled = true;
                     break;
@@ -704,6 +719,10 @@ namespace Pings
         {
             StopMonitoring();
             ClearVeiw();
+
+            // クリア操作後は編集を許可する
+            _allowEditAfterStop = true;
+            UpdateUiState("Initial");
 
             if (btnPingStart != null)
             {
@@ -1077,11 +1096,14 @@ namespace Pings
                     {
                         sw.WriteLine("障害イベントは記録されていません。");
                     }
-
-                    sw.WriteLine(); // 終端改行
+                    sw.WriteLine();
                 }
 
                 MessageBox.Show($"監視結果をファイルに保存しました（追記モード）：\n{filePath}", "保存完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+                // 保存後は対象アドレス/Host名の編集を許可する
+                _allowEditAfterStop = true;
+                UpdateUiState("Stopped");
             }
             catch (Exception ex)
             {
@@ -1241,6 +1263,9 @@ namespace Pings
 
         private void StartMonitoring()
         {
+            // 監視開始時は停止直後の編集を許可しない
+            _allowEditAfterStop = false;
+
             cts = new CancellationTokenSource();
             txtStartTime.Text = DateTime.Now.ToString("yyyy/MM/dd HH:mm:ss");
             txtEndTime.Text = "";
@@ -1311,6 +1336,10 @@ namespace Pings
                 cts.Dispose();
                 cts = null;
                 txtEndTime.Text = DateTime.Now.ToString("yyyy/MM/dd HH:mm:ss");
+
+                // 停止直後は対象アドレス/Host名の編集を禁止する
+                _allowEditAfterStop = false;
+
                 UpdateUiState("Stopped");
 
                 if (btnPingStart != null)
@@ -1787,7 +1816,7 @@ namespace Pings
 
                     var lbl = new Label
                     {
-                        // 要求どおり "対象アドレス_Host名" 形式で表示
+                        // 要求どおり "対象アドレス_ホスト名" 形式で表示
                         Text = $"{address}_{hostName}",
                         Dock = DockStyle.Top,
                         Height = 18,
