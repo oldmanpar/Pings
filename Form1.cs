@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Reflection; // Reflection を使用するために追加
 using System.Diagnostics;
+using System.Collections.Concurrent;
 
 // ---------------------------------------------------------
 // 1. データ保持クラス (障害イベントログ)
@@ -402,7 +403,7 @@ namespace Pings
         // Traceroute専用キャンセルソース（Ping監視とは独立）
         private CancellationTokenSource tracerouteCts;
 
-        // 追加: フィールド（他の private フィールド群の近く）
+        // 追加: フィールド（他の private フィールド群の近くに追加）
         private volatile bool _isTracerouteRunning = false;
 
         // 追加: メニューでの自動保存チェックアイテム参照
@@ -420,6 +421,14 @@ namespace Pings
         // 高速ロードのための再利用 Regex（空白連続を1個に置換）
         private static readonly System.Text.RegularExpressions.Regex _wsRegex =
             new System.Text.RegularExpressions.Regex(@"\s+", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+        // -------------------------
+        // Traceroute の進捗管理フィールド
+        // -------------------------
+        // 各アドレスの完了状態を保持（Run 中は null でない）
+        private ConcurrentDictionary<string, bool> _tracerouteCompletion;
+        // ユーザーによって停止メッセージを既に挿入したかを保持
+        private ConcurrentDictionary<string, bool> _tracerouteStoppedByUser;
 
         public Form1()
         {
@@ -855,7 +864,7 @@ namespace Pings
                         using (StreamReader sr = new StreamReader(ofd.FileName, encoding))
                         {
                             string line;
-                            // 1. ファイル全体を読み込む（ここではメモリに一時的に全部保持するが、
+                            // 1. ファイル全体を読み込む（ここではメモリに一時的に全部保持するが、 
                             //    処理はメモリ的に問題ない前提。巨大ファイルはストリーム処理に切替可）
                             while ((line = sr.ReadLine()) != null)
                             {
@@ -1714,8 +1723,7 @@ namespace Pings
                 }
 
                 // バインディング更新
-                try
-                {
+                try {
                     monitorList.ResetBindings();
                 }
                 catch
@@ -1817,7 +1825,7 @@ namespace Pings
 
             // 共通ヘッダ（全列に表示）を出力 — 既存の結果が残っている場合は追記される
             AppendTracerouteOutputToAll("================================================================\r\n", false);
-            AppendTracerouteOutputToAll($"== Traceroute: {DateTime.Now:yyyy/MM/dd HH:mm:ss} ==\r\n", true);
+            AppendTracerouteOutputToAll($"== Traceroute: {DateTime.Now:yyyy/MM/dd HH:mm:ss} ==\r\n", false);
             AppendTracerouteOutputToAll("----------------------------------------------------------------\r\n", false);
 
             // Traceroute専用 CTS（Ping の cts と連動させるが独立してキャンセル可能）
@@ -1828,9 +1836,13 @@ namespace Pings
 
             bool wasCanceled = false;
 
+            // 完了状態をアドレス単位で保持する辞書 (並列用)
+            var completion = new ConcurrentDictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            foreach (var a in targets) completion[a] = false;
+
             try
             {
-                await RunTracerouteForAddressesAsync(targets, token);
+                await RunTracerouteForAddressesAsync(targets, token, completion);
             }
             catch (OperationCanceledException)
             {
@@ -1838,20 +1850,50 @@ namespace Pings
             }
             catch (Exception ex)
             {
-                AppendTracerouteOutputToAll($"--- エラー: {ex.Message} ---\r\n\r\n", true);
+                AppendTracerouteOutputToAll($"--- エラー: {ex.Message} ---\r\n\r\n", false);
             }
             finally
             {
                 // If token was requested to cancel (by Stop button), treat as "途中停止"
                 if (tracerouteCts != null && tracerouteCts.IsCancellationRequested) wasCanceled = true;
 
-                if (wasCanceled)
+                // 指定仕様: Tracerouteタブで、まだトレースが途中の場合は停止メッセージを記入する
+                // （既にユーザーが Stop ボタンでメッセージを挿入済みのものは二重挿入しない）
+                foreach (var address in targets)
                 {
-                    AppendTracerouteOutputToAll("=== Tracerouteは途中で停止されました。 ===\r\n\r\n", true);
-                }
-                else
-                {
-                    AppendTracerouteOutputToAll("=== Traceroute 完了 ===\r\n\r\n", true);
+                    bool done = _tracerouteCompletion != null && _tracerouteCompletion.TryGetValue(address, out var d) && d;
+                    bool stoppedAlready = _tracerouteStoppedByUser != null && _tracerouteStoppedByUser.TryGetValue(address, out var s) && s;
+
+                    if (done)
+                    {
+                        // 正常に完了したアドレス: 完了メッセージを付加（ユーザー停止メッセージが既にある場合は付けない）
+                        if (!stoppedAlready)
+                        {
+                            AppendTracerouteOutput(address, "=== Traceroute 完了 ===\r\n\r\n", false);
+                        }
+                    }
+                    else
+                    {
+                        // 未完了 (途中停止または異常終了)
+                        if (wasCanceled)
+                        {
+                            // ユーザーによる停止の場合: まだ挿入していなければここで挿入
+                            if (!stoppedAlready)
+                            {
+                                AppendTracerouteOutput(address, "=== Tracerouteは途中で停止されました。 ===\r\n\r\n", false);
+                                if (_tracerouteStoppedByUser != null) _tracerouteStoppedByUser[address] = true;
+                            }
+                        }
+                        else
+                        {
+                            // 非キャンセルで未完了になった異常ケース
+                            if (!stoppedAlready)
+                            {
+                                AppendTracerouteOutput(address, "=== Traceroute 終了 (ステータス不明) ===\r\n\r\n", false);
+                                if (_tracerouteStoppedByUser != null) _tracerouteStoppedByUser[address] = true;
+                            }
+                        }
+                    }
                 }
 
                 AppendTracerouteOutputToAll("================================================================\r\n\r\n", false);
@@ -1869,10 +1911,14 @@ namespace Pings
 
                 tracerouteCts?.Dispose();
                 tracerouteCts = null;
+
+                // フィールドをクリア
+                _tracerouteCompletion = null;
+                _tracerouteStoppedByUser = null;
             }
         }
 
-        private async Task RunTracerouteForAddressesAsync(List<string> addresses, CancellationToken token)
+        private async Task RunTracerouteForAddressesAsync(List<string> addresses, CancellationToken token, ConcurrentDictionary<string, bool> completion)
         {
             // 並列実行（SemaphoreSlim により制御）
             var tasks = addresses.Select(async address =>
@@ -1880,7 +1926,7 @@ namespace Pings
                 await tracerouteSemaphore.WaitAsync(token).ConfigureAwait(false);
                 try
                 {
-                    await RunTracerouteAsync(address, token).ConfigureAwait(false);
+                    await RunTracerouteAsync(address, token, completion).ConfigureAwait(false);
                 }
                 finally
                 {
@@ -1891,7 +1937,7 @@ namespace Pings
             await Task.WhenAll(tasks).ConfigureAwait(false);
         }
 
-        private async Task RunTracerouteAsync(string address, CancellationToken token)
+        private async Task RunTracerouteAsync(string address, CancellationToken token, ConcurrentDictionary<string, bool> completion)
         {
             // Windows の tracert を使用。-d (名前解決なし) を付けることで高速化。
             // タイムアウト等は tracert の -w で調整可能（ms）。ここでは cmbTimeout の値を利用。
@@ -1906,7 +1952,7 @@ namespace Pings
             string arguments = $"-d -w {tryTimeoutMs} {address}";
 
             // 各アドレスごとに見出し行をセット（追記）
-            AppendTracerouteOutput(address, $"--- tracert {address} (timeout={tryTimeoutMs}ms) ---\r\n", true);
+            AppendTracerouteOutput(address, $"--- tracert {address} (timeout={tryTimeoutMs}ms) ---\r\n", false);
 
             var psi = new ProcessStartInfo
             {
@@ -1954,7 +2000,7 @@ namespace Pings
 
                                 if (line == null) break;
 
-                                // 1行到着ごとにアドレス別 TextBox へ追加（タイムスタンプは先頭行のみ）
+                                // 1行到着ごとにアドレス別 TextBox へ追加（タイムスタンプは行頭に付けない仕様）
                                 AppendTracerouteOutput(address, line + Environment.NewLine, false);
                             }
                         }
@@ -1968,7 +2014,7 @@ namespace Pings
                             proc.WaitForExit(1000);
                         }
                     }
- catch { }
+                    catch { }
                 }
                 catch (Exception ex)
                 {
@@ -1980,12 +2026,16 @@ namespace Pings
                     {
                         try { proc.Kill(); } catch { }
                     }
+
+                    // このアドレスは処理が終了した（成功・失敗に関わらず）としてマーク
+                    if (completion != null) completion[address] = true;
                 }
             }
         }
 
         /// <summary>
         /// 指定したアドレスの出力領域へ1行ずつ追加する。アドレスごとに分割表示するためのメソッド。
+        /// ※ 仕様変更: 行の最初にタイムスタンプを記載しない（keepTimestamp を無視）。
         /// </summary>
         private void AppendTracerouteOutput(string address, string text, bool keepTimestamp)
         {
@@ -2012,10 +2062,7 @@ namespace Pings
                 return;
             }
 
-            if (keepTimestamp)
-            {
-                tb.AppendText($"[{DateTime.Now:HH:mm:ss}] ");
-            }
+            // 仕様: 行頭タイムスタンプを付けない → ここではタイムスタンプ挿入を行わない
             tb.AppendText(text);
             tb.SelectionStart = tb.Text.Length;
             tb.ScrollToCaret();
@@ -2026,6 +2073,7 @@ namespace Pings
 
         /// <summary>
         /// 全てのトレーサウト領域に同報で出力する（ヘッダーなど）。
+        /// ※ 仕様変更: 行の最初にタイムスタンプを記載しない（keepTimestamp を無視）。
         /// </summary>
         private void AppendTracerouteOutputToAll(string text, bool keepTimestamp)
         {
@@ -2040,7 +2088,7 @@ namespace Pings
                 {
                     tb.Invoke(new Action<string, bool>((t, k) =>
                     {
-                        if (k) tb.AppendText($"[{DateTime.Now:HH:mm:ss}] ");
+                        // タイムスタンプを付けない仕様
                         tb.AppendText(t);
                         tb.SelectionStart = tb.Text.Length;
                         tb.ScrollToCaret();
@@ -2048,7 +2096,7 @@ namespace Pings
                 }
                 else
                 {
-                    if (keepTimestamp) tb.AppendText($"[{DateTime.Now:HH:mm:ss}] ");
+                    // タイムスタンプを付けない仕様
                     tb.AppendText(text);
                     tb.SelectionStart = tb.Text.Length;
                     tb.ScrollToCaret();
@@ -2180,6 +2228,29 @@ namespace Pings
         // 追加: Traceroute 停止ボタンの処理（実行中にキャンセル）
         private void BtnStopTraceroute_Click(object sender, EventArgs e)
         {
+            // 仕様: Tracerouteタブで、まだトレースが途中の場合は停止メッセージを記入する
+            // _tracerouteCompletion と _tracerouteStoppedByUser がセットされていれば未完了のものへ即座に挿入する
+            try
+            {
+                if (_tracerouteCompletion != null)
+                {
+                    foreach (var kv in _tracerouteCompletion)
+                    {
+                        var address = kv.Key;
+                        var done = kv.Value;
+                        bool stoppedAlready = _tracerouteStoppedByUser != null && _tracerouteStoppedByUser.TryGetValue(address, out var s) && s;
+
+                        if (!done && !stoppedAlready)
+                        {
+                            // 未完了のターゲットに停止メッセージを挿入
+                            AppendTracerouteOutput(address, "=== Tracerouteは途中で停止されました。 ===\r\n\r\n", false);
+                            if (_tracerouteStoppedByUser != null) _tracerouteStoppedByUser[address] = true;
+                        }
+                    }
+                }
+            }
+            catch { /* UI更新中などの例外は無視 */ }
+
             if (tracerouteCts != null)
             {
                 try
