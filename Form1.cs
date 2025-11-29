@@ -1838,7 +1838,16 @@ namespace Pings
 
             // 完了状態をアドレス単位で保持する辞書 (並列用)
             var completion = new ConcurrentDictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
-            foreach (var a in targets) completion[a] = false;
+            var stoppedByUser = new ConcurrentDictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            foreach (var a in targets)
+            {
+                completion[a] = false;
+                stoppedByUser[a] = false;
+            }
+
+            // フィールドにセットして Stop ボタンからアクセス可能にする
+            _tracerouteCompletion = completion;
+            _tracerouteStoppedByUser = stoppedByUser;
 
             try
             {
@@ -1854,11 +1863,11 @@ namespace Pings
             }
             finally
             {
-                // If token was requested to cancel (by Stop button), treat as "途中停止"
+                // token の状態もチェックして確実にユーザー停止を検出
                 if (tracerouteCts != null && tracerouteCts.IsCancellationRequested) wasCanceled = true;
 
-                // 指定仕様: Tracerouteタブで、まだトレースが途中の場合は停止メッセージを記入する
-                // （既にユーザーが Stop ボタンでメッセージを挿入済みのものは二重挿入しない）
+                // 変更: 停止（キャンセル）された場合のみ、未完了ターゲットへ停止メッセージを挿入する。
+                //       既に完了しているターゲットには停止メッセージを挿入しない。
                 foreach (var address in targets)
                 {
                     bool done = _tracerouteCompletion != null && _tracerouteCompletion.TryGetValue(address, out var d) && d;
@@ -1866,7 +1875,7 @@ namespace Pings
 
                     if (done)
                     {
-                        // 正常に完了したアドレス: 完了メッセージを付加（ユーザー停止メッセージが既にある場合は付けない）
+                        // 完了済み: 完了メッセージを付加（ユーザー停止メッセージが既にある場合は付けない）
                         if (!stoppedAlready)
                         {
                             AppendTracerouteOutput(address, "=== Traceroute 完了 ===\r\n\r\n", false);
@@ -1874,24 +1883,19 @@ namespace Pings
                     }
                     else
                     {
-                        // 未完了 (途中停止または異常終了)
-                        if (wasCanceled)
+                        // 未完了:
+                        // - ユーザーが停止を要求した（wasCanceled == true）場合は停止メッセージを挿入
+                        // - 既に BtnStopTraceroute により挿入済み（stoppedAlready）は二重挿入を避ける
+                        if (wasCanceled && !stoppedAlready)
                         {
-                            // ユーザーによる停止の場合: まだ挿入していなければここで挿入
-                            if (!stoppedAlready)
-                            {
-                                AppendTracerouteOutput(address, "=== Tracerouteは途中で停止されました。 ===\r\n\r\n", false);
-                                if (_tracerouteStoppedByUser != null) _tracerouteStoppedByUser[address] = true;
-                            }
+                            AppendTracerouteOutput(address, "=== Tracerouteは途中で停止されました。 ===\r\n\r\n", false);
+                            if (_tracerouteStoppedByUser != null) _tracerouteStoppedByUser[address] = true;
                         }
-                        else
+                        else if (!wasCanceled && !stoppedAlready)
                         {
-                            // 非キャンセルで未完了になった異常ケース
-                            if (!stoppedAlready)
-                            {
-                                AppendTracerouteOutput(address, "=== Traceroute 終了 (ステータス不明) ===\r\n\r\n", false);
-                                if (_tracerouteStoppedByUser != null) _tracerouteStoppedByUser[address] = true;
-                            }
+                            // キャンセルでない（通常は例外等の異常終了）場合は状態不明メッセージ
+                            AppendTracerouteOutput(address, "=== Traceroute 終了 ===\r\n\r\n", false);
+                            if (_tracerouteStoppedByUser != null) _tracerouteStoppedByUser[address] = true;
                         }
                     }
                 }
@@ -1905,7 +1909,6 @@ namespace Pings
                 // 自動保存追加
                 if (mnuAutoSaveTraceroute != null && mnuAutoSaveTraceroute.Checked)
                 {
-                    // 自動保存は UI をクリアせずに追記保存する
                     SaveTracerouteOutputsAutoAppend();
                 }
 
@@ -2228,8 +2231,8 @@ namespace Pings
         // 追加: Traceroute 停止ボタンの処理（実行中にキャンセル）
         private void BtnStopTraceroute_Click(object sender, EventArgs e)
         {
-            // 仕様: Tracerouteタブで、まだトレースが途中の場合は停止メッセージを記入する
-            // _tracerouteCompletion と _tracerouteStoppedByUser がセットされていれば未完了のものへ即座に挿入する
+            // 仕様: Traceroute停止ボタンが押された時点で、まだ完了していないターゲットには
+            //       即座に「途中で停止されました」メッセージを挿入する（完了済みはスキップ）。
             try
             {
                 if (_tracerouteCompletion != null)
@@ -2242,7 +2245,7 @@ namespace Pings
 
                         if (!done && !stoppedAlready)
                         {
-                            // 未完了のターゲットに停止メッセージを挿入
+                            // 未完了のターゲットに停止メッセージを挿入（完了済みは挿入しない）
                             AppendTracerouteOutput(address, "=== Tracerouteは途中で停止されました。 ===\r\n\r\n", false);
                             if (_tracerouteStoppedByUser != null) _tracerouteStoppedByUser[address] = true;
                         }
