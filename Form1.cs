@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Reflection; // Reflection を使用するために追加
+using System.Diagnostics;
 
 // ---------------------------------------------------------
 // 1. データ保持クラス (障害イベントログ)
@@ -174,6 +175,9 @@ namespace Pings
         // UIからの入力値
         public int 送信間隔ms { get; set; } = 500;
         public int タイムアウトms { get; set; } = 1000;
+
+        // 追加: Traceroute 対象フラグ
+        public bool Trace { get; set; } = false;
 
         // III. コンストラクタとリセット
         public PingMonitorItem() : this(0, "", "")
@@ -386,6 +390,11 @@ namespace Pings
         private DataGridViewColumn currentSortColumn = null;
         private ListSortDirection currentSortDirection = ListSortDirection.Ascending;
 
+        private Button btnTraceroute; // 追加: Traceroute実行ボタン
+        private TabPage traceroutePage; // 追加: Traceroute タブ
+        private TextBox txtTracerouteOutput; // 追加: 出力表示用 TextBox
+        private SemaphoreSlim tracerouteSemaphore = new SemaphoreSlim(4); // 追加: 同時実行制限（任意で調整）
+
 
         public Form1()
         {
@@ -422,6 +431,7 @@ namespace Pings
             UpdateUiState("Initial");
         }
 
+        // 5) UpdateUiState を少し修正し、Running 中は Trace 列のみ編集可能にする
         private void UpdateUiState(string state)
         {
             if (this.MainMenuStrip != null)
@@ -437,12 +447,47 @@ namespace Pings
             }
 
             bool isEditable = (state == "Initial");
-            dgvMonitor.ReadOnly = !isEditable;
+
+            // デフォルト: DataGridView を編集可能にして、列ごとに ReadOnly を設定する
+            dgvMonitor.ReadOnly = false;
             dgvMonitor.AllowUserToAddRows = isEditable;
 
-            cmbInterval.Enabled = (state == "Initial");
-            cmbTimeout.Enabled = (state == "Initial");
+            // 各列の ReadOnly を状況に応じて調整
+            foreach (DataGridViewColumn col in dgvMonitor.Columns)
+            {
+                if (state == "Initial")
+                {
+                    // Initial: 対象アドレス/Host名 は編集可、順番は readonly、Trace は編集可
+                    if (col.DataPropertyName == "対象アドレス" || col.DataPropertyName == "Host名" || col.DataPropertyName == "Trace")
+                        col.ReadOnly = false;
+                    else
+                        col.ReadOnly = true;
+                }
+                else if (state == "Running")
+                {
+                    // Running: 変更できるのは Trace のみ（チェックの切替）
+                    if (col.DataPropertyName == "Trace")
+                        col.ReadOnly = false;
+                    else
+                        col.ReadOnly = true;
+                }
+                else // Stopped
+                {
+                    // Stopped: 編集可能に戻す（初期状態と同様）
+                    if (col.DataPropertyName == "対象アドレス" || col.DataPropertyName == "Host名" || col.DataPropertyName == "Trace")
+                        col.ReadOnly = false;
+                    else
+                        col.ReadOnly = true;
+                }
+            }
 
+            // Traceroute ボタン制御（既存）
+            if (btnTraceroute != null)
+            {
+                btnTraceroute.Enabled = (state == "Running");
+            }
+
+            // 既存のスイッチ文でボタン有効/無効を設定（省略せずそのまま保持してください）
             switch (state)
             {
                 case "Initial":
@@ -605,8 +650,8 @@ namespace Pings
         {
             if (e.Row.IsNewRow)
             {
-                // 表示用に次の番号を割り当て、重複を避けるためにインクリメントする
-                e.Row.Cells[1].Value = _nextIndex;
+                // 順番列は現在インデックス 2 (0:ステータス,1:Trace,2:順番)
+                e.Row.Cells[2].Value = _nextIndex;
                 _nextIndex++;
             }
         }
@@ -1174,7 +1219,8 @@ private void RecalculateOrderNumbers()
                 AutoGenerateColumns = false,
                 BackgroundColor = SystemColors.ControlLight,
                 RowHeadersVisible = false,
-                SelectionMode = DataGridViewSelectionMode.FullRowSelect
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+                MultiSelect = true // 複数選択を有効
             };
             statsPage.Controls.Add(dgvMonitor);
             tabControl.Controls.Add(statsPage);
@@ -1195,6 +1241,21 @@ private void RecalculateOrderNumbers()
             logPage.Controls.Add(dgvLog);
             tabControl.Controls.Add(logPage);
 
+            // ----- 追加: Traceroute タブ -----
+            traceroutePage = new TabPage("Traceroute");
+            txtTracerouteOutput = new TextBox
+            {
+                Dock = DockStyle.Fill,
+                Multiline = true,
+                ReadOnly = true,
+                ScrollBars = ScrollBars.Both,
+                Font = new Font(FontFamily.GenericMonospace, 9f),
+                BackColor = SystemColors.Window
+            };
+            traceroutePage.Controls.Add(txtTracerouteOutput);
+            tabControl.Controls.Add(traceroutePage);
+            // --------------------------------
+
             // 下部パネル (ボタン)
             Panel bottomPanel = new Panel { Dock = DockStyle.Bottom, Height = 40 };
             this.Controls.Add(bottomPanel);
@@ -1203,12 +1264,14 @@ private void RecalculateOrderNumbers()
             btnStop = new Button { Text = "停止", Location = new Point(100, 5), Width = 80 };
             btnClear = new Button { Text = "クリア", Location = new Point(190, 5), Width = 80 };
             btnSave = new Button { Text = "Ping結果保存", Location = new Point(280, 5), Width = 110 };
+            btnTraceroute = new Button { Text = "Traceroute実行", Location = new Point(400, 5), Width = 120 }; // 追加ボタン
             btnExit = new Button { Text = "終了", Location = new Point(this.ClientSize.Width - 90, 5), Width = 80, Anchor = AnchorStyles.Right };
 
             bottomPanel.Controls.Add(btnPingStart);
             bottomPanel.Controls.Add(btnStop);
             bottomPanel.Controls.Add(btnClear);
             bottomPanel.Controls.Add(btnSave);
+            bottomPanel.Controls.Add(btnTraceroute); // 追加
             bottomPanel.Controls.Add(btnExit);
 
             // イベントハンドラの設定
@@ -1217,6 +1280,7 @@ private void RecalculateOrderNumbers()
             btnClear.Click += BtnClear_Click;
             btnExit.Click += BtnExit_Click;
             btnSave.Click += BtnSaveResult_Click;
+            btnTraceroute.Click += BtnTraceroute_Click; // 追加
 
             // コントロールのZオーダー調整 (一番上にタブ、一番下にメニュー)
             tabControl.BringToFront();
@@ -1228,15 +1292,31 @@ private void RecalculateOrderNumbers()
             }
         }
 
-
         private void SetupDataGridViewColumns()
         {
             dgvMonitor.AllowUserToAddRows = true;
             dgvMonitor.ReadOnly = false;
             dgvMonitor.Columns.Clear();
 
+            // ステータス
             dgvMonitor.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "ステータス", HeaderText = "ｽﾃｰﾀｽ", Width = 60, ReadOnly = true });
+
+            // 追加: Trace チェックボックス列（ステータスの次、順番の前）
+            var traceCol = new DataGridViewCheckBoxColumn
+            {
+                DataPropertyName = "Trace",
+                HeaderText = "Trace",
+                Width = 60,
+                TrueValue = true,
+                FalseValue = false,
+                ThreeState = false
+            };
+            dgvMonitor.Columns.Add(traceCol);
+
+            // 順番（インデックスは上から 0:ステータス, 1:Trace, 2:順番 になる）
             dgvMonitor.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "順番", HeaderText = "順番", Width = 50, ReadOnly = true });
+
+            // 残りのカラム（対象アドレス等）は従来どおり
             dgvMonitor.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "対象アドレス", HeaderText = "対象アドレス", Width = 120, ReadOnly = false });
             dgvMonitor.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Host名", HeaderText = "Host名", Width = 120, ReadOnly = false });
             dgvMonitor.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "送信回数", HeaderText = "送信回数", Width = 80, ReadOnly = true });
@@ -1272,21 +1352,17 @@ private void RecalculateOrderNumbers()
                 }
             };
 
-            // ★障害イベントログ用カラム設定 (ソート対応のための変更)★
-            // List<DisruptionLogItem> を基に SortableBindingList を初期化
+            // 監視ログ列の初期化は既存のまま（省略）
             disruptionLogList = new SortableBindingList<DisruptionLogItem>(new List<DisruptionLogItem>());
             dgvLog.DataSource = disruptionLogList;
-
-            // ★追加: カラムヘッダーのクリックイベントをフック★
             dgvLog.ColumnHeaderMouseClick += dgvLog_ColumnHeaderMouseClick;
-
             dgvLog.Columns.Clear();
             dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "対象アドレス", HeaderText = "対象アドレス", Width = 120 });
             dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Host名", HeaderText = "Host名", Width = 120 });
             dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Down開始日時", HeaderText = "Down開始日時", Width = 150, DefaultCellStyle = new DataGridViewCellStyle { Format = "yyyy/MM/dd HH:mm:ss" } });
             dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "復旧日時", HeaderText = "復旧日時", Width = 150, DefaultCellStyle = new DataGridViewCellStyle { Format = "yyyy/MM/dd HH:mm:ss" } });
             dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "失敗回数", HeaderText = "失敗回数", Width = 80, ReadOnly = true });
-            dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "失敗時間mmss", HeaderText = "失敗時間[hh:mm:ss]", Width = 100, DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleRight,Format = @"hh\:mm\:ss" } });
+            dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "失敗時間mmss", HeaderText = "失敗時間[hh:mm:ss]", Width = 100, DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleRight, Format = @"hh\:mm\:ss" } });
 
             // Down前の統計
             dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Down前平均ms", HeaderText = "Down前平均[ms]", Width = 110, DefaultCellStyle = new DataGridViewCellStyle { Format = "F1", Alignment = DataGridViewContentAlignment.MiddleRight } });
@@ -1297,6 +1373,10 @@ private void RecalculateOrderNumbers()
             dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "復旧後平均ms", HeaderText = "復旧後平均[ms]", Width = 110, DefaultCellStyle = new DataGridViewCellStyle { Format = "F1", Alignment = DataGridViewContentAlignment.MiddleRight } });
             dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "復旧後最小ms", HeaderText = "復旧後最小[ms]", Width = 110, DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleRight } });
             dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "復旧後最大ms", HeaderText = "復旧後最大[ms]", Width = 110, DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleRight } });
+
+            // ヘッダダブルクリックイベントを確実に登録（これが無いと動作しません）
+            dgvMonitor.ColumnHeaderMouseDoubleClick -= DgvMonitor_ColumnHeaderMouseDoubleClick;
+            dgvMonitor.ColumnHeaderMouseDoubleClick += DgvMonitor_ColumnHeaderMouseDoubleClick;
 
             // 初期ソートは復旧日時（昇順）
             // DataGridView の初期表示ではソートインジケータは設定しない
@@ -1348,6 +1428,188 @@ private void RecalculateOrderNumbers()
             }
         }
 
+        // 4) ヘッダのダブルクリックイベントハンドラを追加
+        private void DgvMonitor_ColumnHeaderMouseDoubleClick(object sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (e.ColumnIndex < 0 || e.ColumnIndex >= dgvMonitor.Columns.Count) return;
 
+            var col = dgvMonitor.Columns[e.ColumnIndex];
+            if (col.DataPropertyName == "Trace")
+            {
+                // ひとつでも未チェックがあれば全チェック、すべてチェックなら全解除
+                bool anyUnchecked = monitorList.Any(i => !i.Trace);
+                foreach (var item in monitorList)
+                {
+                    item.Trace = anyUnchecked;
+                }
+
+                // バインディング更新
+                try
+                {
+                    monitorList.ResetBindings();
+                }
+                catch
+                {
+                    dgvMonitor.Refresh();
+                }
+            }
+        }
+
+        // ------------------- Traceroute ロジック -------------------
+        private async void BtnTraceroute_Click(object sender, EventArgs e)
+{
+    if (cts == null)
+    {
+        MessageBox.Show("Ping監視中にのみTracerouteを実行できます。", "実行不可", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        return;
+    }
+
+    // チェックされた行のみを対象
+    var targets = monitorList
+        .Where(i => i.Trace && !string.IsNullOrWhiteSpace(i.対象アドレス))
+        .Select(i => i.対象アドレス)
+        .Distinct()
+        .ToList();
+
+    if (!targets.Any())
+    {
+        MessageBox.Show("Traceroute対象が選択されていません。Trace 列にチェックを入れてください。", "実行不可", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        return;
+    }
+
+    // Tracerouteタブを選択して出力をクリア
+    tabControl.SelectedTab = traceroutePage;
+    AppendTracerouteOutput($"== Traceroute: {DateTime.Now:yyyy/MM/dd HH:mm:ss} ==\r\n", true);
+
+    try
+    {
+        await RunTracerouteForAddressesAsync(targets, cts.Token);
+        AppendTracerouteOutput("=== Traceroute 完了 ===\r\n\r\n", true);
+    }
+    catch (OperationCanceledException)
+    {
+        AppendTracerouteOutput("=== Traceroute はキャンセルされました ===\r\n\r\n", true);
+    }
+    catch (Exception ex)
+    {
+        AppendTracerouteOutput($"--- エラー: {ex.Message} ---\r\n\r\n", true);
+    }
+}
+
+        private async Task RunTracerouteForAddressesAsync(List<string> addresses, CancellationToken token)
+        {
+            // 並列実行（SemaphoreSlim により制御）
+            var tasks = addresses.Select(async address =>
+            {
+                await tracerouteSemaphore.WaitAsync(token).ConfigureAwait(false);
+                try
+                {
+                    await RunTracerouteAsync(address, token).ConfigureAwait(false);
+                }
+                finally
+                {
+                    tracerouteSemaphore.Release();
+                }
+            }).ToArray();
+
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+        }
+
+        private async Task RunTracerouteAsync(string address, CancellationToken token)
+        {
+            // Windows の tracert を使用。-d (名前解決なし) を付けることで高速化。
+            // タイムアウト等は tracert の -w で調整可能（ms）。ここでは cmbTimeout の値を利用。
+            int tryTimeoutMs = 4000;
+            int parsed;
+            if (int.TryParse(cmbTimeout?.Text, out parsed))
+            {
+                // tracert の -w は各ホップのタイムアウト(ms)。ここで使用。
+                tryTimeoutMs = Math.Max(100, parsed);
+            }
+
+            string arguments = $"-d -w {tryTimeoutMs} {address}";
+
+            AppendTracerouteOutput($"--- tracert {address} (timeout={tryTimeoutMs}ms) ---\r\n", true);
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = "tracert",
+                Arguments = arguments,
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                StandardOutputEncoding = System.Text.Encoding.GetEncoding(932) // Windows の tracert 出力エンコーディング (日本環境想定)
+            };
+
+            using (var proc = new Process { StartInfo = psi })
+            {
+                try
+                {
+                    proc.Start();
+
+                    // 非同期で全出力を読み取る（長時間になる可能性あり）
+                    Task<string> readTask = proc.StandardOutput.ReadToEndAsync();
+
+                    // 監視用キャンセルを監視。キャンセル時はプロセスを強制終了する。
+                    using (token.Register(() =>
+                    {
+                        try
+                        {
+                            if (!proc.HasExited)
+                            {
+                                proc.Kill();
+                            }
+                        }
+                        catch { /* ignore */ }
+                    }))
+                    {
+                        string output;
+                        try
+                        {
+                            output = await readTask.ConfigureAwait(false);
+                        }
+                        catch (Exception exRead)
+                        {
+                            output = $"(出力取得エラー: {exRead.Message})";
+                        }
+
+                        // UI に出力を追加
+                        AppendTracerouteOutput(output + "\r\n", false);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    AppendTracerouteOutput($"(tracert 実行エラー: {ex.Message})\r\n", false);
+                }
+                finally
+                {
+                    if (!proc.HasExited)
+                    {
+                        try { proc.Kill(); } catch { }
+                    }
+                }
+            }
+        }
+
+        private void AppendTracerouteOutput(string text, bool keepTimestamp)
+        {
+            if (txtTracerouteOutput.InvokeRequired)
+            {
+                txtTracerouteOutput.Invoke(new Action<string, bool>(AppendTracerouteOutput), text, keepTimestamp);
+                return;
+            }
+
+            // 必要に応じてタイムスタンプ挿入（ヘッダ的に扱う場合）
+            if (keepTimestamp)
+            {
+                txtTracerouteOutput.AppendText($"[{DateTime.Now:HH:mm:ss}] ");
+            }
+            txtTracerouteOutput.AppendText(text);
+            // スクロールを末尾へ
+            txtTracerouteOutput.SelectionStart = txtTracerouteOutput.Text.Length;
+            txtTracerouteOutput.ScrollToCaret();
+        }
+        // ---------------------------------------------------------------
+        // （既存の他メソッド、フィールドはそのまま）
     }
 }
