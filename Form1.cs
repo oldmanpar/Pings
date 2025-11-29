@@ -319,7 +319,7 @@ namespace Pings
                 // ========== 失敗時の処理 ==========
                 if (!_isCurrentlyDown)
                 {
-                    // Down開始イベント: Downになったらアクティブログをクリアし、更新を終了する
+                    // Down開始イベント: DownになったらアクティBLOGをクリアし、更新を終了する
                     _activeLogItem = null;
 
                     // Down開始イベント: 現在の統計をスナップショットとして保存
@@ -405,6 +405,11 @@ namespace Pings
         // 追加: フィールド（他の private フィールド群の近く）
         private volatile bool _isTracerouteRunning = false;
 
+        // 追加: メニューでの自動保存チェックアイテム参照
+        private ToolStripMenuItem mnuAutoSaveAllPing;
+
+        // 保存時の1ターゲットあたりの表示固定幅（px）。要件3に対応。
+        private const int TracerouteColumnWidth = 600;
 
         public Form1()
         {
@@ -594,7 +599,13 @@ namespace Pings
             fileMenu.DropDownItems.Add(exitItem);
 
             menuStrip.Items.Add(fileMenu);
-            menuStrip.Items.Add(new ToolStripMenuItem("オプション"));
+
+            var optionsMenu = new ToolStripMenuItem("オプション");
+            // 5) 全Ping結果を自動保存するチェックボックス
+            mnuAutoSaveAllPing = new ToolStripMenuItem("全Ping結果を保存する") { CheckOnClick = true };
+            optionsMenu.DropDownItems.Add(mnuAutoSaveAllPing);
+
+            menuStrip.Items.Add(optionsMenu);
 
             var helpMenu = new ToolStripMenuItem("ヘルプ");
             var versionItem = new ToolStripMenuItem("バージョン情報");
@@ -1165,6 +1176,19 @@ namespace Pings
 
             Action<DisruptionLogItem> logAction = AddDisruptionLogItem;
 
+            // 5) メニューの「全Ping結果を保存する」がオンのとき、実行ファイルの場所へ自動保存（追記）
+            if (mnuAutoSaveAllPing != null && mnuAutoSaveAllPing.Checked)
+            {
+                try
+                {
+                    SaveAllPingResultsAutoAppend();
+                }
+                catch
+                {
+                    // 保存失敗はログや例外にせず無視（必要なら通知を追加）
+                }
+            }
+
             foreach (var item in monitorList.Where(i => !string.IsNullOrEmpty(i.対象アドレス) && i.順番 > 0))
             {
                 item.送信間隔ms = interval;
@@ -1176,6 +1200,25 @@ namespace Pings
             if (dgvMonitor != null)
             {
                 dgvMonitor.AllowUserToDeleteRows = false;
+            }
+        }
+
+        // All_Ping_Result_yyyymmdd.txt に開始情報と簡易ヘッダーを追記する
+        private void SaveAllPingResultsAutoAppend()
+        {
+            string folder = AppDomain.CurrentDomain.BaseDirectory;
+            string fileName = Path.Combine(folder, $"All_Ping_Result_{DateTime.Now:yyyyMMdd}.txt");
+            using (var sw = new StreamWriter(fileName, true, System.Text.Encoding.GetEncoding(932)))
+            {
+                sw.WriteLine("========================================");
+                sw.WriteLine($"開始日時: {DateTime.Now:yyyy/MM/dd HH:mm:ss}");
+                sw.WriteLine($"送信間隔: {cmbInterval?.Text} ms  タイムアウト: {cmbTimeout?.Text} ms");
+                sw.WriteLine("--- 監視対象 ---");
+                foreach (var item in monitorList.OrderBy(i => i.順番))
+                {
+                    sw.WriteLine($"{item.順番}: {item.対象アドレス}  ({item.Host名})");
+                }
+                sw.WriteLine();
             }
         }
 
@@ -1259,7 +1302,7 @@ namespace Pings
         private void InitializeCustomComponents()
         {
             this.Text = "Pings B版";
-            this.Size = new Size(1300, 600);
+            this.Size = new Size(1300, 700);
             this.StartPosition = FormStartPosition.CenterScreen;
 
             uiUpdateTimer = new System.Windows.Forms.Timer();
@@ -1341,26 +1384,40 @@ namespace Pings
             contentPanel.Controls.Add(tabControl);
             contentPanel.Controls.Add(topPanel);
 
-            // bottom panel
-            Panel bottomPanel = new Panel { Dock = DockStyle.Bottom, Height = 40, Margin = new Padding(0) };
-            btnPingStart = new Button { Text = "Ping開始", Location = new Point(10, 5), Width = 80 };
-            btnStop = new Button { Text = "停止", Location = new Point(100, 5), Width = 80 };
-            btnClear = new Button { Text = "クリア", Location = new Point(190, 5), Width = 80 };
-            btnSave = new Button { Text = "Ping結果保存", Location = new Point(280, 5), Width = 110 };
-            btnTraceroute = new Button { Text = "Traceroute実行", Location = new Point(400, 5), Width = 120 };
-            btnSaveTraceroute = new Button { Text = "Traceroute保存", Location = new Point(530, 5), Width = 120 };
-            btnClearTraceroute = new Button { Text = "Tracerouteクリア", Location = new Point(660, 5), Width = 110 };
-            btnStopTraceroute = new Button { Text = "Traceroute停止", Location = new Point(785, 5), Width = 120 };
-            btnExit = new Button { Text = "終了", Location = new Point(this.ClientSize.Width - 90, 5), Width = 80, Anchor = AnchorStyles.Right };
+            // bottom panel - グループで分けて配置
+            Panel bottomPanel = new Panel { Dock = DockStyle.Bottom, Height = 80, Margin = new Padding(0) };
 
-            bottomPanel.Controls.Add(btnPingStart);
-            bottomPanel.Controls.Add(btnStop);
-            bottomPanel.Controls.Add(btnClear);
-            bottomPanel.Controls.Add(btnSave);
-            bottomPanel.Controls.Add(btnTraceroute);
-            bottomPanel.Controls.Add(btnSaveTraceroute);
-            bottomPanel.Controls.Add(btnClearTraceroute); // 追加
-            bottomPanel.Controls.Add(btnStopTraceroute); // 追加: Traceroute停止ボタン
+            // Ping 関連グループ
+            GroupBox gbPing = new GroupBox { Text = "Ping", Dock = DockStyle.Left, Width = 460, Padding = new Padding(8) };
+            btnPingStart = new Button { Text = "Ping開始", Location = new Point(8, 22), Width = 100 };
+            btnStop = new Button { Text = "Ping停止", Location = new Point(116, 22), Width = 100 };
+            btnClear = new Button { Text = "Ping結果クリア", Location = new Point(224, 22), Width = 110 }; // 名前変更
+            btnSave = new Button { Text = "Ping結果保存", Location = new Point(340, 22), Width = 110 };
+
+            gbPing.Controls.Add(btnPingStart);
+            gbPing.Controls.Add(btnStop);
+            gbPing.Controls.Add(btnClear);
+            gbPing.Controls.Add(btnSave);
+
+            // Traceroute 関連グループ
+            GroupBox gbTrace = new GroupBox { Text = "Traceroute", Dock = DockStyle.Left, Width = 760, Padding = new Padding(8) };
+            btnTraceroute = new Button { Text = "Traceroute実行", Location = new Point(8, 22), Width = 120 };
+            btnStopTraceroute = new Button { Text = "Traceroute停止", Location = new Point(136, 22), Width = 120 };
+            btnClearTraceroute = new Button { Text = "Trace結果クリア", Location = new Point(264, 22), Width = 140 }; // 名前変更
+            btnSaveTraceroute = new Button { Text = "Trace結果保存", Location = new Point(412, 22), Width = 140 }; // 名前変更
+
+            gbTrace.Controls.Add(btnTraceroute);
+            gbTrace.Controls.Add(btnStopTraceroute);
+            gbTrace.Controls.Add(btnClearTraceroute);
+            gbTrace.Controls.Add(btnSaveTraceroute);
+
+            // add groupboxes to bottom panel
+            bottomPanel.Controls.Add(gbTrace);
+            bottomPanel.Controls.Add(gbPing);
+
+            // add exit button to the right
+            btnExit = new Button { Text = "終了", Anchor = AnchorStyles.Right | AnchorStyles.Top, Width = 80, Height = 30 };
+            btnExit.Location = new Point(this.ClientSize.Width - btnExit.Width - 10, 20);
             bottomPanel.Controls.Add(btnExit);
 
             // add to form
@@ -1595,14 +1652,17 @@ namespace Pings
                 tracerouteTextBoxes.Clear();
                 traceroutePanel.Controls.Clear();
 
-                // 列数を targets.Count に設定
+                // 列数を targets.Count に設定（固定幅の列を作る）
                 int colCount = Math.Max(1, targets.Count);
                 traceroutePanel.ColumnCount = colCount;
                 traceroutePanel.RowCount = 1;
                 traceroutePanel.ColumnStyles.Clear();
+                traceroutePanel.AutoScroll = true;
+
                 for (int i = 0; i < colCount; i++)
                 {
-                    traceroutePanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / colCount));
+                    // 要件3: 固定幅（折り返ししない）にするため Absolute を使用
+                    traceroutePanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, TracerouteColumnWidth));
                 }
 
                 // 各ターゲットに対して縦にラベル + TextBox を作る
@@ -1610,7 +1670,7 @@ namespace Pings
                 {
                     string address = targets[i];
 
-                    var container = new Panel { Dock = DockStyle.Fill, Padding = new Padding(2) };
+                    var container = new Panel { Dock = DockStyle.Fill, Padding = new Padding(2), Width = TracerouteColumnWidth };
 
                     var lbl = new Label
                     {
@@ -1626,6 +1686,7 @@ namespace Pings
                         Multiline = true,
                         ReadOnly = true,
                         ScrollBars = ScrollBars.Both,
+                        WordWrap = false, // 折り返しなし
                         Font = new Font(FontFamily.GenericMonospace, 9f),
                         Dock = DockStyle.Fill,
                         BackColor = SystemColors.Window
@@ -1644,7 +1705,9 @@ namespace Pings
             }
 
             // 共通ヘッダ（全列に表示）を出力 — 既存の結果が残っている場合は追記される
+            AppendTracerouteOutputToAll("================================================================\r\n", false);
             AppendTracerouteOutputToAll($"== Traceroute: {DateTime.Now:yyyy/MM/dd HH:mm:ss} ==\r\n", true);
+            AppendTracerouteOutputToAll("----------------------------------------------------------------\r\n", false);
 
             // Traceroute専用 CTS（Ping の cts と連動させるが独立してキャンセル可能）
             tracerouteCts?.Dispose();
@@ -1679,6 +1742,8 @@ namespace Pings
                 {
                     AppendTracerouteOutputToAll("=== Traceroute 完了 ===\r\n\r\n", true);
                 }
+
+                AppendTracerouteOutputToAll("================================================================\r\n\r\n", false);
 
                 // 実行終了後にフラグを戻してボタンを更新
                 _isTracerouteRunning = false;
@@ -1785,7 +1850,7 @@ namespace Pings
                             proc.WaitForExit(1000);
                         }
                     }
-                    catch { }
+ catch { }
                 }
                 catch (Exception ex)
                 {
@@ -1883,50 +1948,47 @@ namespace Pings
                 return;
             }
 
-            // ユーザーに保存先フォルダを選ばせる（複数ファイルを作成するため）
-            using (var fbd = new FolderBrowserDialog())
+            // 実行ファイルと同じフォルダへ保存する仕様（要件1）
+            string folder = AppDomain.CurrentDomain.BaseDirectory;
+
+            try
             {
-                fbd.Description = "Traceroute結果の保存先フォルダを選択してください。";
-                if (fbd.ShowDialog() != DialogResult.OK) return;
-
-                string folder = fbd.SelectedPath;
-                try
+                // 各対象アドレスごとにファイルを作成（追記モード）。ファイル名に使えない文字は置換。
+                foreach (var kv in tracerouteTextBoxes)
                 {
-                    // 各対象アドレスごとにファイルを作成（追記モード）。ファイル名に使えない文字は置換。
-                    foreach (var kv in tracerouteTextBoxes)
+                    string address = kv.Key;
+                    string content = kv.Value.Text;
+                    if (string.IsNullOrEmpty(content)) continue;
+
+                    // ファイル名: Traceroute_result_yyyymmdd_対象ホスト名.txt
+                    string safeHost = SanitizeFileName(address);
+                    string fileName = Path.Combine(folder, $"Traceroute_result_{DateTime.Now:yyyyMMdd}_{safeHost}.txt");
+
+                    // 追記で保存（既存があれば追記）
+                    using (var sw = new StreamWriter(fileName, true, System.Text.Encoding.GetEncoding(932)))
                     {
-                        string address = kv.Key;
-                        string content = kv.Value.Text;
-                        if (string.IsNullOrEmpty(content)) continue;
-
-                        string safe = SanitizeFileName(address);
-                        string fileName = Path.Combine(folder, $"Traceroute_Resurt_({safe}).txt");
-
-                        // 追記で保存（指定どおり: 既存があれば追記）
-                        using (var sw = new StreamWriter(fileName, true, System.Text.Encoding.GetEncoding(932)))
-                        {
-                            sw.WriteLine($"== Traceroute saved: {DateTime.Now:yyyy/MM/dd HH:mm:ss} ==");
-                            sw.WriteLine(content);
-                            sw.WriteLine();
-                        }
-
-                        // 保存後は画面上の該当TextBoxをクリア
-                        if (kv.Value.InvokeRequired)
-                        {
-                            kv.Value.Invoke(new Action(() => kv.Value.Clear()));
-                        }
-                        else
-                        {
-                            kv.Value.Clear();
-                        }
+                        sw.WriteLine("----------------------------------------------------------------");
+                        sw.WriteLine($"Saved: {DateTime.Now:yyyy/MM/dd HH:mm:ss}");
+                        sw.WriteLine(content);
+                        sw.WriteLine();
                     }
 
-                    MessageBox.Show("Traceroute 出力をフォルダに保存しました（各対象ごとにファイルを作成/追記）。", "保存完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    // 保存後は画面上の該当TextBoxをクリア（要件3）
+                    if (kv.Value.InvokeRequired)
+                    {
+                        kv.Value.Invoke(new Action(() => kv.Value.Clear()));
+                    }
+                    else
+                    {
+                        kv.Value.Clear();
+                    }
                 }
-                catch (Exception ex)
-                {
-                    MessageBox.Show($"ファイルの保存中にエラーが発生しました:\n{ex.Message}", "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }
+
+                MessageBox.Show("Traceroute 出力を実行ファイルと同じフォルダへ保存しました（対象ごとに追記保存）。", "保存完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"ファイルの保存中にエラーが発生しました:\n{ex.Message}", "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
 
             // 保存後はボタン状態を更新（表示をクリアしているため Save は無効化される）
