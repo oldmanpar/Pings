@@ -869,36 +869,30 @@ namespace Pings
                         using (StreamReader sr = new StreamReader(ofd.FileName, encoding))
                         {
                             string line;
-                            // 1. ファイル全体を読み込む（ここではメモリに一時的に全部保持するが、 
-                            //    処理はメモリ的に問題ない前提。巨大ファイルはストリーム処理に切替可）
                             while ((line = sr.ReadLine()) != null)
                             {
                                 allLines.Add(line);
                             }
                         }
 
-                        // 2. ヘッダー検出とスキップ
+                        // ヘッダー検出とスキップ
                         bool isSavedCsvFormat = false;
                         if (allLines.Any())
                         {
-                            // ヘッダー判定用に空白を除去
                             string headerCandidate = allLines[0].Trim().Replace(" ", "");
-
-                            // プログラムで保存したCSVヘッダーと一致するかチェック（大文字小文字無視）
                             if (headerCandidate.Equals("対象アドレス,Host名", StringComparison.OrdinalIgnoreCase))
                             {
-                                allLines.RemoveAt(0); // ヘッダー行をスキップ
+                                allLines.RemoveAt(0);
                                 isSavedCsvFormat = true;
                             }
                         }
 
-                        // 3. 各行を解析してメモリ上のリストを構築（ここでは UI 更新を行わない）
+                        // 各行を解析して監視対象リストを構築
                         foreach (string currentLine in allLines)
                         {
                             string trimmedLine = currentLine.Trim();
                             if (string.IsNullOrWhiteSpace(trimmedLine)) continue;
 
-                            // 注釈行のチェック (行頭が [ # ; ')
                             if (trimmedLine.StartsWith("[") || trimmedLine.StartsWith("#") || trimmedLine.StartsWith(";") || trimmedLine.StartsWith("'"))
                             {
                                 continue;
@@ -909,14 +903,12 @@ namespace Pings
 
                             if (isSavedCsvFormat)
                             {
-                                // ★ プログラム保存CSV専用パス ★
                                 string[] parts = currentLine.Split(new[] { ',' }, 2).Select(p => p.Trim()).ToArray();
                                 address = parts[0];
                                 hostName = parts.Length > 1 ? parts[1] : "";
                             }
                             else
                             {
-                                // ExPing形式/プレーンテキスト パス
                                 int separatorIndex = -1;
                                 for (int i = 0; i < currentLine.Length; i++)
                                 {
@@ -946,20 +938,14 @@ namespace Pings
                                 }
                             }
 
-                            // アドレスが空の場合はスキップ
                             if (string.IsNullOrEmpty(address)) continue;
 
                             newMonitorItems.Add(new PingMonitorItem(index++, address, hostName));
                         }
 
-                        // ここからが高速化ポイント:
-                        // 既存の monitorList を一括で差し替え、UI は一度だけ更新する。
-                        // 古い list のイベントハンドラを外してから新しい BindingList を作成する。
-
-                        // prepare new binding
+                        // リストを差し替え（UI更新を最小化）
                         var newBinding = new BindingList<PingMonitorItem>(newMonitorItems);
 
-                        // detach old handler if any
                         try
                         {
                             if (monitorList != null)
@@ -969,11 +955,7 @@ namespace Pings
                         }
                         catch { /* ignore */ }
 
-                        // Swap data source with minimal UI churn
-                        if (dgvMonitor != null)
-                        {
-                            dgvMonitor.SuspendLayout();
-                        }
+                        if (dgvMonitor != null) dgvMonitor.SuspendLayout();
 
                         monitorList = newBinding;
                         monitorList.ListChanged += MonitorList_ListChanged;
@@ -985,11 +967,11 @@ namespace Pings
                             dgvMonitor.Refresh();
                         }
 
-                        // Update next index and UI state
                         _nextIndex = index;
                         UpdateUiState("Initial");
 
-                        MessageBox.Show("監視対象アドレスをファイルから読み込みました。", "読込完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        // 変更: 読み込んだ件数を表示するメッセージへ
+                        MessageBox.Show($"監視対象アドレスを　{newMonitorItems.Count}件　読み込みました。", "読込完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     }
                     catch (Exception ex)
                     {
