@@ -18,7 +18,7 @@ namespace Pings
 
             // 指定された文字列を設定
             this.labelInfo.Text =
-                "Pings β　Ver0.5\n" +
+                "Pings Ver1.00\n" +
                 "Susumu Tanaka";
         }
 
