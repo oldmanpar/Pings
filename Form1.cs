@@ -723,8 +723,6 @@ namespace Pings
 
 
 
-
-
         private void DgvMonitor_DefaultValuesNeeded(object sender, DataGridViewRowEventArgs e)
         {
             if (e.Row.IsNewRow)
@@ -2011,9 +2009,15 @@ namespace Pings
                     string content = kv.Value.Text;
                     if (string.IsNullOrEmpty(content)) continue;
 
-                    // ファイル名: Traceroute_result_yyyymmdd_対象ホスト名.log (拡張子を .log に統一)
-                    string safeHost = SanitizeFileName(address);
-                    string fileName = Path.Combine(folder, $"Traceroute_result_{DateTime.Now:yyyyMMdd}_{safeHost}.log");
+                    // Host名を monitorList から取得（同一アドレスが複数ある場合は最初のものを使用）
+                    string hostName = monitorList?
+                        .FirstOrDefault(i => string.Equals(i.対象アドレス, address, StringComparison.OrdinalIgnoreCase))
+                        ?.Host名 ?? "";
+
+                    // ファイル名: Traceroute_result_yyyymmdd_対象アドレス_ホスト名.log (拡張子を .log に統一)
+                    string safeAddress = SanitizeFileName(address);
+                    string safeHost = SanitizeFileName(hostName);
+                    string fileName = Path.Combine(folder, $"Traceroute_result_{DateTime.Now:yyyyMMdd}_{safeAddress}_{safeHost}.log");
 
                     // 追記で保存（既存があれば追記）
                     using (var sw = new StreamWriter(fileName, true, System.Text.Encoding.GetEncoding(932)))
