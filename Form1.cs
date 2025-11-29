@@ -157,13 +157,13 @@ namespace Pings
         // 現在アクティブなログエントリを保持するフィールド
         private DisruptionLogItem _activeLogItem = null;
 
-        // 計算用: 現在の「Up期間」の累積データ（復旧時にリセットされる）
-        private long _currentSessionSum = 0;
-        private int _currentSessionCount = 0;
+        // 計算用: CURRENT_SESSION の Up 時間
+        private long _currentSessionUpTimeMs = 0;
+        private int _currentSessionSuccessCount = 0;
         private long _currentSessionMin = 0;
         private long _currentSessionMax = 0;
 
-        // Down直前の統計スナップショット
+        // Down時の統計スナップショット
         private bool _isCurrentlyDown = false;
         private double _snapAvg = 0.0;
         private long _snapMin = 0;
@@ -203,14 +203,10 @@ namespace Pings
             最小値ms = 0;
             最大値ms = 0;
 
-            _currentSessionSum = 0;
-            _currentSessionCount = 0;
+            _currentSessionUpTimeMs = 0;
+            _currentSessionSuccessCount = 0;
             _currentSessionMin = 0;
             _currentSessionMax = 0;
-
-            ステータス = "";
-            連続失敗時間s = "";
-            最大失敗時間s = "";
 
             _continuousDownStartTime = null;
             _maxDisruptionDuration = TimeSpan.Zero;
@@ -267,8 +263,8 @@ namespace Pings
                     }
 
                     // セッション統計のリセット
-                    _currentSessionSum = 0;
-                    _currentSessionCount = 0;
+                    _currentSessionUpTimeMs = 0;
+                    _currentSessionSuccessCount = 0;
                     _currentSessionMin = 0;
                     _currentSessionMax = 0;
 
@@ -288,11 +284,11 @@ namespace Pings
                 ステータス = HasBeenDown ? "復旧" : "OK";
 
                 // セッション統計の更新 (現在のUp期間の集計)
-                _currentSessionCount++;
-                _currentSessionSum += rtt;
+                _currentSessionSuccessCount++;
+                _currentSessionUpTimeMs += rtt;
 
                 // 最小値/最大値の更新
-                if (_currentSessionCount == 1)
+                if (_currentSessionSuccessCount == 1)
                 {
                     _currentSessionMin = rtt;
                     _currentSessionMax = rtt;
@@ -304,7 +300,7 @@ namespace Pings
                 }
 
                 // 公開プロパティへの反映
-                平均値ms = (double)_currentSessionSum / _currentSessionCount;
+                平均値ms = (double)_currentSessionUpTimeMs / _currentSessionSuccessCount;
                 最小値ms = _currentSessionMin;
                 最大値ms = _currentSessionMax;
 
@@ -522,7 +518,7 @@ namespace Pings
             }
         }
 
-        // 追加: Traceroute ボタン状態更新メソッド
+        // 変更済: Traceroute ボタン状態更新メソッド
         private void UpdateTracerouteButtons()
         {
             if (btnTraceroute == null || btnSaveTraceroute == null) return;
@@ -533,8 +529,9 @@ namespace Pings
                 return;
             }
 
+            // Ping 実行状態に依存しないように変更:
             bool hasCheckedTrace = (monitorList != null) && monitorList.Any(i => i.Trace && !string.IsNullOrWhiteSpace(i.対象アドレス));
-            btnTraceroute.Enabled = (cts != null) && hasCheckedTrace && !_isTracerouteRunning;
+            btnTraceroute.Enabled = hasCheckedTrace && !_isTracerouteRunning;
 
             bool hasTracerouteOutput = !string.IsNullOrEmpty(txtTracerouteOutput?.Text);
             btnSaveTraceroute.Enabled = !_isTracerouteRunning && hasTracerouteOutput;
@@ -1277,7 +1274,7 @@ namespace Pings
             {
                 Dock = DockStyle.Fill,
                 AutoGenerateColumns = false,
-                BackgroundColor = SystemColors.ControlLightLight,
+                BackgroundColor = SystemColors.ControlLight,
                 RowHeadersVisible = false,
                 SelectionMode = DataGridViewSelectionMode.FullRowSelect
             };
@@ -1290,7 +1287,7 @@ namespace Pings
                 Dock = DockStyle.Fill,
                 AutoGenerateColumns = false,
                 ReadOnly = true,
-                BackgroundColor = SystemColors.ControlLightLight,
+                BackgroundColor = SystemColors.ControlLight,
                 RowHeadersVisible = false,
                 SelectionMode = DataGridViewSelectionMode.FullRowSelect,
                 AllowUserToDeleteRows = false,
@@ -1440,6 +1437,13 @@ namespace Pings
             dgvMonitor.ColumnHeaderMouseDoubleClick -= DgvMonitor_ColumnHeaderMouseDoubleClick;
             dgvMonitor.ColumnHeaderMouseDoubleClick += DgvMonitor_ColumnHeaderMouseDoubleClick;
 
+            // 追加: チェックボックスの値変更を検出してボタン状態を更新する
+            dgvMonitor.CellValueChanged -= DgvMonitor_CellValueChanged;
+            dgvMonitor.CellValueChanged += DgvMonitor_CellValueChanged;
+
+            dgvMonitor.CurrentCellDirtyStateChanged -= DgvMonitor_CurrentCellDirtyStateChanged;
+            dgvMonitor.CurrentCellDirtyStateChanged += DgvMonitor_CurrentCellDirtyStateChanged;
+
             // 初期ソートは復旧日時（昇順）
             // DataGridView の初期表示ではソートインジケータは設定しない
         }
@@ -1514,18 +1518,15 @@ namespace Pings
                 {
                     dgvMonitor.Refresh();
                 }
+
+                // 追加: Trace 列の一括切替後に Traceroute ボタンを更新
+                UpdateTracerouteButtons();
             }
         }
 
         // ------------------- Traceroute ロジック -------------------
         private async void BtnTraceroute_Click(object sender, EventArgs e)
         {
-            if (cts == null)
-            {
-                MessageBox.Show("Ping監視中にのみTracerouteを実行できます。", "実行不可", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
             // チェックされた行のみを対象
             var targets = monitorList
                 .Where(i => i.Trace && !string.IsNullOrWhiteSpace(i.対象アドレス))
@@ -1547,9 +1548,12 @@ namespace Pings
             tabControl.SelectedTab = traceroutePage;
             AppendTracerouteOutput($"== Traceroute: {DateTime.Now:yyyy/MM/dd HH:mm:ss} ==\r\n", true);
 
+            // Ping 監視の CTS を使うが、未開始の場合は None 를使用します。
+            var token = cts?.Token ?? CancellationToken.None;
+
             try
             {
-                await RunTracerouteForAddressesAsync(targets, cts.Token);
+                await RunTracerouteForAddressesAsync(targets, token);
                 AppendTracerouteOutput("=== Traceroute 完了 ===\r\n\r\n", true);
             }
             catch (OperationCanceledException)
@@ -1713,6 +1717,31 @@ namespace Pings
                         MessageBox.Show($"ファイルの保存中にエラーが発生しました:\n{ex.Message}", "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     }
                 }
+            }
+        }
+
+        // 追加: チェックボックスの即時反映用イベント（編集状態をコミットして CellValueChanged を発火させる）
+        private void DgvMonitor_CurrentCellDirtyStateChanged(object sender, EventArgs e)
+        {
+            if (dgvMonitor.IsCurrentCellDirty)
+            {
+                var cell = dgvMonitor.CurrentCell;
+                if (cell is DataGridViewCheckBoxCell)
+                {
+                    // チェックボックスは编辑直後にコミットすることで CellValueChanged を発火させる
+                    dgvMonitor.CommitEdit(DataGridViewDataErrorContexts.Commit);
+                }
+            }
+        }
+
+        // 追加: チェックボックス変更を検知したら Traceroute ボタン状態を更新
+        private void DgvMonitor_CellValueChanged(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
+            var col = dgvMonitor.Columns[e.ColumnIndex];
+            if (col.DataPropertyName == "Trace")
+            {
+                UpdateTracerouteButtons();
             }
         }
         // ---------------------------------------------------------------
