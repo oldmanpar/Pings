@@ -418,7 +418,7 @@ namespace Pings
         private ToolStripMenuItem mnuAutoSaveTraceroute;
 
         // 保存時の1ターゲットあたりの表示固定幅（px）。要件3に対応。
-        private const int TracerouteColumnWidth = 600;
+        private const int TracerouteColumnWidth = 480;
 
         // 追加フィールド（クラス内、他の private フィールド群の近くに追加）
         private readonly object _allPingLogLock = new object();
@@ -1789,16 +1789,24 @@ namespace Pings
                     traceroutePanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, TracerouteColumnWidth));
                 }
 
-                // 各ターゲットに対して縦にラベル + TextBox を作る
+                // BtnTraceroute_Click 内の「各ターゲットに対して縦にラベル + TextBox を作る」ループを以下に置換してください。
+                // 変更点: ラベルの Text を "対象アドレス_Host名" 形式にしています。
+
                 for (int i = 0; i < targets.Count; i++)
                 {
                     string address = targets[i];
 
                     var container = new Panel { Dock = DockStyle.Fill, Padding = new Padding(2), Width = TracerouteColumnWidth };
 
+                    // MonitorList から Host名 を取得（同一アドレスが複数あれば先頭を使用）
+                    string hostName = monitorList?
+                        .FirstOrDefault(m => string.Equals(m.対象アドレス, address, StringComparison.OrdinalIgnoreCase))
+                        ?.Host名 ?? "";
+
                     var lbl = new Label
                     {
-                        Text = address,
+                        // 要求どおり "対象アドレス_Host名" 形式で表示
+                        Text = $"{address}_{hostName}",
                         Dock = DockStyle.Top,
                         Height = 18,
                         TextAlign = ContentAlignment.MiddleLeft,
@@ -1816,6 +1824,7 @@ namespace Pings
                         BackColor = SystemColors.Window
                     };
 
+                    // Label を上に、TextBox を下に配置
                     container.Controls.Add(tb);
                     container.Controls.Add(lbl);
 
