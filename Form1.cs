@@ -411,6 +411,9 @@ namespace Pings
         // 保存時の1ターゲットあたりの表示固定幅（px）。要件3に対応。
         private const int TracerouteColumnWidth = 600;
 
+        // 追加フィールド（クラス内、他の private フィールド群の近くに追加）
+        private readonly object _allPingLogLock = new object();
+
         public Form1()
         {
             // ★修正箇所: デザイナー生成コードを呼び出す★
@@ -959,19 +962,28 @@ namespace Pings
                 return;
             }
 
+            // デフォルトファイル名は要求通り "Ping_Result_yyyymmdd.log"
             using (SaveFileDialog sfd = new SaveFileDialog())
             {
-                sfd.FileName = $"Pings_Result_{DateTime.Now:yyyyMMdd_HHmmss}.csv";
-                sfd.Filter = "CSVファイル (*.csv)|*.csv|すべてのファイル (*.*)|*.*";
+                sfd.FileName = $"Ping_Result_{DateTime.Now:yyyyMMdd}.log";
+                sfd.Filter = "ログファイル (*.log)|*.log|すべてのファイル (*.*)|*.*";
                 sfd.Title = "監視結果を保存";
+                sfd.DefaultExt = "log";
+                sfd.AddExtension = true;
 
                 if (sfd.ShowDialog() == DialogResult.OK)
                 {
                     try
                     {
+                        // 追記モードで保存（再実行時は追記される）
                         // Shift-JIS (Encoding.GetEncoding(932)) でファイルに書き込みます。
-                        using (StreamWriter sw = new StreamWriter(sfd.FileName, false, System.Text.Encoding.GetEncoding(932)))
+                        using (StreamWriter sw = new StreamWriter(sfd.FileName, true, System.Text.Encoding.GetEncoding(932)))
                         {
+                            // 区切りヘッダ（追記したときに分かりやすくする）
+                            sw.WriteLine("================================================================");
+                            sw.WriteLine($"Saved: {DateTime.Now:yyyy/MM/dd HH:mm:ss}");
+                            sw.WriteLine();
+
                             // --- 1. ヘッダー情報 ---
                             sw.WriteLine($"開始日時　：　{txtStartTime.Text}");
                             sw.WriteLine($"終了日時　：　{txtEndTime.Text}");
@@ -1046,9 +1058,11 @@ namespace Pings
                             {
                                 sw.WriteLine("障害イベントは記録されていません。");
                             }
+
+                            sw.WriteLine(); // 終端改行
                         }
 
-                        MessageBox.Show("監視結果をCSVファイルに保存しました。", "保存完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        MessageBox.Show("監視結果をログファイルに保存しました（追記モード）。", "保存完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     }
                     catch (Exception ex)
                     {
@@ -1203,11 +1217,11 @@ namespace Pings
             }
         }
 
-        // All_Ping_Result_yyyymmdd.txt に開始情報と簡易ヘッダーを追記する
+        // All_Ping_Result_yyyymmdd.log に開始情報と簡易ヘッダーを追記する
         private void SaveAllPingResultsAutoAppend()
         {
             string folder = AppDomain.CurrentDomain.BaseDirectory;
-            string fileName = Path.Combine(folder, $"All_Ping_Result_{DateTime.Now:yyyyMMdd}.txt");
+            string fileName = Path.Combine(folder, $"All_Ping_Result_{DateTime.Now:yyyyMMdd}.log");
             using (var sw = new StreamWriter(fileName, true, System.Text.Encoding.GetEncoding(932)))
             {
                 sw.WriteLine("========================================");
@@ -1388,7 +1402,7 @@ namespace Pings
             Panel bottomPanel = new Panel { Dock = DockStyle.Bottom, Height = 80, Margin = new Padding(0) };
 
             // Ping 関連グループ
-            GroupBox gbPing = new GroupBox { Text = "Ping", Dock = DockStyle.Left, Width = 460, Padding = new Padding(8) };
+            GroupBox gbPing = new GroupBox { Text = "Ping", Dock = DockStyle.None, Width = 460, Padding = new Padding(8), AutoSize = false };
             btnPingStart = new Button { Text = "Ping開始", Location = new Point(8, 22), Width = 100 };
             btnStop = new Button { Text = "Ping停止", Location = new Point(116, 22), Width = 100 };
             btnClear = new Button { Text = "Ping結果クリア", Location = new Point(224, 22), Width = 110 }; // 名前変更
@@ -1400,7 +1414,7 @@ namespace Pings
             gbPing.Controls.Add(btnSave);
 
             // Traceroute 関連グループ
-            GroupBox gbTrace = new GroupBox { Text = "Traceroute", Dock = DockStyle.Left, Width = 760, Padding = new Padding(8) };
+            GroupBox gbTrace = new GroupBox { Text = "Traceroute", Dock = DockStyle.None, Width = 760, Padding = new Padding(8), AutoSize = false };
             btnTraceroute = new Button { Text = "Traceroute実行", Location = new Point(8, 22), Width = 120 };
             btnStopTraceroute = new Button { Text = "Traceroute停止", Location = new Point(136, 22), Width = 120 };
             btnClearTraceroute = new Button { Text = "Trace結果クリア", Location = new Point(264, 22), Width = 140 }; // 名前変更
@@ -1411,14 +1425,41 @@ namespace Pings
             gbTrace.Controls.Add(btnClearTraceroute);
             gbTrace.Controls.Add(btnSaveTraceroute);
 
-            // add groupboxes to bottom panel
-            bottomPanel.Controls.Add(gbTrace);
-            bottomPanel.Controls.Add(gbPing);
+            // 左側にグループボックスを流す FlowLayoutPanel を作成して、それぞれの枠が"囲み切る"ように配置
+            var leftFlow = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Left,
+                AutoSize = false,
+                Width = gbPing.Width + gbTrace.Width + 24,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                Padding = new Padding(8),
+                Margin = new Padding(0)
+            };
+            leftFlow.Controls.Add(gbPing);
+            leftFlow.Controls.Add(gbTrace);
 
-            // add exit button to the right
-            btnExit = new Button { Text = "終了", Anchor = AnchorStyles.Right | AnchorStyles.Top, Width = 80, Height = 30 };
-            btnExit.Location = new Point(this.ClientSize.Width - btnExit.Width - 10, 20);
-            bottomPanel.Controls.Add(btnExit);
+            // 右側に終了ボタンを置くためのパネル（枠に被らないように右端に固定）
+            var rightPanel = new Panel
+            {
+                Dock = DockStyle.Right,
+                Width = 120,
+                Padding = new Padding(8)
+            };
+
+            // add exit button to the right (inside rightPanel)
+            btnExit = new Button { Text = "終了", Anchor = AnchorStyles.Top | AnchorStyles.Right, Width = 80, Height = 30 };
+            btnExit.Location = new Point(rightPanel.ClientSize.Width - btnExit.Width - 10, 20);
+            // adjust location when resized
+            rightPanel.Resize += (s, e) =>
+            {
+                btnExit.Location = new Point(Math.Max(8, rightPanel.ClientSize.Width - btnExit.Width - 10), 20);
+            };
+            rightPanel.Controls.Add(btnExit);
+
+            // add flow and right panel to bottom panel
+            bottomPanel.Controls.Add(rightPanel);
+            bottomPanel.Controls.Add(leftFlow);
 
             // add to form
             if (this.MainMenuStrip != null && !this.Controls.Contains(this.MainMenuStrip))
@@ -1960,9 +2001,9 @@ namespace Pings
                     string content = kv.Value.Text;
                     if (string.IsNullOrEmpty(content)) continue;
 
-                    // ファイル名: Traceroute_result_yyyymmdd_対象ホスト名.txt
+                    // ファイル名: Traceroute_result_yyyymmdd_対象ホスト名.log (拡張子を .log に統一)
                     string safeHost = SanitizeFileName(address);
-                    string fileName = Path.Combine(folder, $"Traceroute_result_{DateTime.Now:yyyyMMdd}_{safeHost}.txt");
+                    string fileName = Path.Combine(folder, $"Traceroute_result_{DateTime.Now:yyyyMMdd}_{safeHost}.log");
 
                     // 追記で保存（既存があれば追記）
                     using (var sw = new StreamWriter(fileName, true, System.Text.Encoding.GetEncoding(932)))
