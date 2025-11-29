@@ -438,6 +438,9 @@ namespace Pings
         // 追加: Ping停止後の編集許可制御フラグ
         private bool _allowEditAfterStop = true;
 
+        // 追加フィールド（他の private フィールド群の近くに追加）
+        private bool _allowIntervalTimeoutEdit = true;
+
         public Form1()
         {
             // ★修正箇所: デザイナー生成コードを呼び出す★
@@ -492,7 +495,7 @@ namespace Pings
 
             bool isEditable = (state == "Initial");
 
-            // デフォルト: DataGridView を編集可能にして、列ごとに ReadOnly を設定する
+            // DataGridView 編集許可
             dgvMonitor.ReadOnly = false;
             dgvMonitor.AllowUserToAddRows = isEditable;
 
@@ -517,8 +520,6 @@ namespace Pings
                 }
                 else // Stopped
                 {
-                    // 変更: Ping停止後は対象アドレス/Host名を編集不可にする（ただし
-                    //       _allowEditAfterStop が true の場合のみ編集可とする）
                     if (col.DataPropertyName == "Trace")
                     {
                         // Trace 列は Stopped 時も切替可能（従来仕様維持）
@@ -549,6 +550,16 @@ namespace Pings
             // 自動保存フラグ（Ping）
             bool autoSavePing = (mnuAutoSaveAllPing != null && mnuAutoSaveAllPing.Checked);
 
+            // 送信間隔/タイムアウト コンボの有効/無効を決める
+            // 有効条件:
+            //  - Traceroute 実行中でないこと
+            //  - Ping が実行中でないこと (state != "Running")
+            //  - ユーザが保存またはクリアして編集許可が付与されていること (_allowIntervalTimeoutEdit)
+            bool allowCombos = !_isTracerouteRunning && state != "Running" && _allowIntervalTimeoutEdit;
+
+            if (cmbInterval != null) cmbInterval.Enabled = allowCombos;
+            if (cmbTimeout != null) cmbTimeout.Enabled = allowCombos;
+
             switch (state)
             {
                 case "Initial":
@@ -572,6 +583,13 @@ namespace Pings
                     // 自動保存が有効な場合は手動保存ボタンを無効にする
                     btnSave.Enabled = !autoSavePing;
                     break;
+            }
+
+            // 追加: Traceroute 実行中は Ping 開始 / 停止を確実に無効化する
+            if (_isTracerouteRunning)
+            {
+                if (btnPingStart != null) btnPingStart.Enabled = false;
+                if (btnStop != null) btnStop.Enabled = false;
             }
         }
 
@@ -688,6 +706,8 @@ namespace Pings
         private void BtnPingStart_Click(object sender, EventArgs e)
         {
             // 1. 既に監視が開始されていたら、一度停止させる（再開時の安全策）
+
+
             StopMonitoring();
             ClearVeiw();
 
@@ -739,6 +759,10 @@ namespace Pings
 
             // クリア操作後は編集を許可する
             _allowEditAfterStop = true;
+
+            // 追加: 送信間隔/タイムアウト編集を有効にする
+            _allowIntervalTimeoutEdit = true;
+
             UpdateUiState("Initial");
 
             if (btnPingStart != null)
@@ -1118,18 +1142,19 @@ namespace Pings
 
                 MessageBox.Show($"監視結果をファイルに保存しました（追記モード）：\n{filePath}", "保存完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
-                // 保存後は対象アドレス/Host名の編集を許可する
+                // 保存成功後に編集許可を与える（既存の処理に追加）
                 _allowEditAfterStop = true;
+                _allowIntervalTimeoutEdit = true;
                 UpdateUiState("Stopped");
+
+                if (btnPingStart != null)
+                {
+                    btnPingStart.Enabled = true; // 有効化
+                }
             }
             catch (Exception ex)
             {
                 MessageBox.Show($"ファイルの保存中にエラーが発生しました:\n{ex.Message}", "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-
-            if (btnPingStart != null)
-            {
-                btnPingStart.Enabled = true; // 有効化
             }
         }
 
@@ -1172,6 +1197,8 @@ namespace Pings
                     if (string.IsNullOrEmpty(content)) continue;
 
                     // Host名を monitorList から取得（同一アドレスが複数ある場合は最初のものを使用）
+
+
                     string hostName = monitorList?
                         .FirstOrDefault(i => string.Equals(i.対象アドレス, address, StringComparison.OrdinalIgnoreCase))
                         ?.Host名 ?? "";
@@ -1283,6 +1310,9 @@ namespace Pings
             // 監視開始時は停止直後の編集を許可しない
             _allowEditAfterStop = false;
 
+            // 追加: 送信間隔/タイムアウトの編集を禁止する
+            _allowIntervalTimeoutEdit = false;
+
             cts = new CancellationTokenSource();
             txtStartTime.Text = DateTime.Now.ToString("yyyy/MM/dd HH:mm:ss");
             txtEndTime.Text = "";
@@ -1297,9 +1327,6 @@ namespace Pings
             ResetLogSortIndicators();
 
             Action<DisruptionLogItem> logAction = AddDisruptionLogItem;
-
-            // 自動で All_Ping_Result に保存する仕様は廃止（Stop時に「Ping結果保存」相当の処理を呼ぶようにする）
-            // 以前ここにあった SaveAllPingResultsAutoAppend() の呼び出しは削除しました。
 
             foreach (var item in monitorList.Where(i => !string.IsNullOrEmpty(i.対象アドレス) && i.順番 > 0))
             {
@@ -1773,6 +1800,11 @@ namespace Pings
 
             // Traceroute 実行フラグを立て、ボタン状態を更新
             _isTracerouteRunning = true;
+
+            // Traceroute 実行開始時はコンボ等の状態を即時更新
+            string curStateStart = (cts != null) ? "Running" : (string.IsNullOrEmpty(txtStartTime?.Text) ? "Initial" : "Stopped");
+            UpdateUiState(curStateStart);
+
             UpdateTracerouteButtons();
 
             // Tracerouteタブを選択
@@ -1889,6 +1921,7 @@ namespace Pings
             {
                 AppendTracerouteOutputToAll($"--- エラー: {ex.Message} ---\r\n\r\n", false);
             }
+
             finally
             {
                 // token の状態もチェックして確実にユーザー停止を検出
@@ -1932,6 +1965,12 @@ namespace Pings
 
                 // 実行終了後にフラグを戻してボタンを更新
                 _isTracerouteRunning = false;
+
+                // 追加: Traceroute 終了後に Ping の現状に応じて Start/Stop ボタンの状態を復元する
+                string curStateEnd = (cts != null) ? "Running" : (string.IsNullOrEmpty(txtStartTime?.Text) ? "Initial" : "Stopped");
+                UpdateUiState(curStateEnd);
+
+                // Traceroute 個別ボタン更新
                 UpdateTracerouteButtons();
 
                 // 自動保存追加
@@ -2157,6 +2196,8 @@ namespace Pings
                     if (string.IsNullOrEmpty(content)) continue;
 
                     // Host名を monitorList から取得（同一アドレスが複数ある場合は最初のものを使用）
+
+
                     string hostName = monitorList?
                         .FirstOrDefault(i => string.Equals(i.対象アドレス, address, StringComparison.OrdinalIgnoreCase))
                         ?.Host名 ?? "";
@@ -2260,7 +2301,8 @@ namespace Pings
         private void BtnStopTraceroute_Click(object sender, EventArgs e)
         {
             // 仕様: Traceroute停止ボタンが押された時点で、まだ完了していないターゲットには
-            //       即座に「途中で停止されました」メッセージを挿入する（完了済みはスキップ）。
+            //       即座に「途中で停止されました」メッセージを挿入する。
+            //       既に完了しているターゲットには停止メッセージを挿入しない。
             try
             {
                 if (_tracerouteCompletion != null)
