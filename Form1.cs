@@ -546,27 +546,31 @@ namespace Pings
                 UpdateTracerouteButtons();
             }
 
-            // 既存のスイッチ文でボタン有効/無効を設定（省略せずそのまま保持してください）
+            // 自動保存フラグ（Ping）
+            bool autoSavePing = (mnuAutoSaveAllPing != null && mnuAutoSaveAllPing.Checked);
+
             switch (state)
             {
                 case "Initial":
                     btnPingStart.Enabled = true;
                     btnStop.Enabled = false;
                     btnClear.Enabled = false;
+                    // Initial 状態では保存は通常無効（既存仕様）。ただし明示的に制御する。
                     btnSave.Enabled = false;
                     break;
                 case "Running":
                     btnPingStart.Enabled = false;
                     btnStop.Enabled = true;
                     btnClear.Enabled = false;
+                    // 実行中は保存不可
                     btnSave.Enabled = false;
                     break;
                 case "Stopped":
                     btnPingStart.Enabled = true;
                     btnStop.Enabled = false;
-                    // Ping停止直後はクリア/保存を有効にし、編集許可は _allowEditAfterStop で制御
                     btnClear.Enabled = true;
-                    btnSave.Enabled = true;
+                    // 自動保存が有効な場合は手動保存ボタンを無効にする
+                    btnSave.Enabled = !autoSavePing;
                     break;
             }
         }
@@ -607,12 +611,10 @@ namespace Pings
                 this.MainMenuStrip.Dock = DockStyle.Top;
                 this.MainMenuStrip.Padding = new Padding(0);
                 this.MainMenuStrip.Margin = new Padding(0);
-                // フォームの Controls に未登録なら登録する
                 if (!this.Controls.Contains(this.MainMenuStrip))
                 {
                     this.Controls.Add(this.MainMenuStrip);
                 }
-                // メニューは先頭に確保
                 try { this.Controls.SetChildIndex(this.MainMenuStrip, 0); } catch { }
                 return;
             }
@@ -644,11 +646,12 @@ namespace Pings
             menuStrip.Items.Add(fileMenu);
 
             var optionsMenu = new ToolStripMenuItem("オプション");
-            // 5) 全Ping結果を自動保存するチェックボックス
-            mnuAutoSaveAllPing = new ToolStripMenuItem("全Ping結果を保存する") { CheckOnClick = true };
+            // 変更: メニュー項目名を "Ping結果の自動保存" にし、初期値をオンに設定、CheckedChanged ハンドラ追加
+            mnuAutoSaveAllPing = new ToolStripMenuItem("Ping結果の自動保存") { CheckOnClick = true, Checked = true };
+            mnuAutoSaveAllPing.CheckedChanged += MnuAutoSaveAllPing_CheckedChanged;
             optionsMenu.DropDownItems.Add(mnuAutoSaveAllPing);
 
-            // 追加: Traceroute 自動保存チェックボックス（初期値オフ）
+            // 追加: Traceroute 自動保存チェックボックス（初期値オン）
             mnuAutoSaveTraceroute = new ToolStripMenuItem("Trace結果の自動保存") { CheckOnClick = true, Checked = true };
             mnuAutoSaveTraceroute.CheckedChanged += MnuAutoSaveTraceroute_CheckedChanged;
             optionsMenu.DropDownItems.Add(mnuAutoSaveTraceroute);
@@ -666,6 +669,20 @@ namespace Pings
 
             // ここでは一度だけインデックスを調整（不要なら削除可）
             try { this.Controls.SetChildIndex(menuStrip, 0); } catch { }
+        }
+
+        // 新規追加: Ping自動保存メニュー切替ハンドラ
+        private void MnuAutoSaveAllPing_CheckedChanged(object sender, EventArgs e)
+        {
+            // メニューの切替で保存ボタンの有効/無効を即時反映
+            // 現在の状態を推測して UpdateUiState を呼ぶ（RunningかInitial/Stopped）
+            string state;
+            if (cts != null)
+                state = "Running";
+            else
+                state = string.IsNullOrEmpty(txtStartTime?.Text) ? "Initial" : "Stopped";
+
+            UpdateUiState(state);
         }
 
         private void BtnPingStart_Click(object sender, EventArgs e)
@@ -1281,18 +1298,8 @@ namespace Pings
 
             Action<DisruptionLogItem> logAction = AddDisruptionLogItem;
 
-            // 5) メニューの「全Ping結果を保存する」がオンのとき、実行ファイルの場所へ自動保存（追記）
-            if (mnuAutoSaveAllPing != null && mnuAutoSaveAllPing.Checked)
-            {
-                try
-                {
-                    SaveAllPingResultsAutoAppend();
-                }
-                catch
-                {
-                    // 保存失敗はログや例外にせず無視（必要なら通知を追加）
-                }
-            }
+            // 自動で All_Ping_Result に保存する仕様は廃止（Stop時に「Ping結果保存」相当の処理を呼ぶようにする）
+            // 以前ここにあった SaveAllPingResultsAutoAppend() の呼び出しは削除しました。
 
             foreach (var item in monitorList.Where(i => !string.IsNullOrEmpty(i.対象アドレス) && i.順番 > 0))
             {
@@ -1308,25 +1315,6 @@ namespace Pings
             }
         }
 
-        // All_Ping_Result_yyyymmdd.log に開始情報と簡易ヘッダーを追記する
-        private void SaveAllPingResultsAutoAppend()
-        {
-            string folder = AppDomain.CurrentDomain.BaseDirectory;
-            string fileName = Path.Combine(folder, $"All_Ping_Result_{DateTime.Now:yyyyMMdd}.log");
-            using (var sw = new StreamWriter(fileName, true, System.Text.Encoding.GetEncoding(932)))
-            {
-                sw.WriteLine("========================================");
-                sw.WriteLine($"開始日時: {DateTime.Now:yyyy/MM/dd HH:mm:ss}");
-                sw.WriteLine($"送信間隔: {cmbInterval?.Text} ms  タイムアウト: {cmbTimeout?.Text} ms");
-                sw.WriteLine("--- 監視対象 ---");
-                foreach (var item in monitorList.OrderBy(i => i.順番))
-                {
-                    sw.WriteLine($"{item.順番}: {item.対象アドレス}  ({item.Host名})");
-                }
-                sw.WriteLine();
-            }
-        }
-
         private void StopMonitoring()
         {
             if (cts != null)
@@ -1339,6 +1327,21 @@ namespace Pings
 
                 // 停止直後は対象アドレス/Host名の編集を禁止する
                 _allowEditAfterStop = false;
+
+                // 変更: 自動保存フラグがオンのときは All_Ping_Result に保存するのではなく
+                // 「Ping結果保存」ボタンを押したときと同じ動作を自動実行する。
+                if (mnuAutoSaveAllPing != null && mnuAutoSaveAllPing.Checked)
+                {
+                    try
+                    {
+                        // BtnSaveResult_Click は UI ハンドラなので、直接呼び出して保存処理を実行する
+                        BtnSaveResult_Click(this, EventArgs.Empty);
+                    }
+                    catch
+                    {
+                        // 自動保存失敗はここで例外を投げず無視（必要ならログ表示を追加）
+                    }
+                }
 
                 UpdateUiState("Stopped");
 
