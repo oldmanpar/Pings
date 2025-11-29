@@ -25,6 +25,13 @@ public class DisruptionLogItem
     public DateTime 復旧日時 { get; set; }
     public string 失敗時間mmss { get; set; }
 
+    // ★追加: 障害中の失敗回数を保持します。★
+    public int 失敗回数 { get; set; }
+
+    // ★既にあるプロパティ★
+    // ★追加: 連続失敗回数をint型で保持します。★
+    public int 連続失敗回数 { get; set; }
+
     // 統計値
     public double Down前平均ms { get; set; }
     public long Down前最小ms { get; set; }
@@ -161,6 +168,9 @@ namespace Pings
         private long _snapMin = 0;
         private long _snapMax = 0;
 
+        // ★追加: 現在進行中の障害で発生した失敗回数（ログ化用）★
+        private int _currentDisruptionFailureCount = 0;
+
         // UIからの入力値
         public int 送信間隔ms { get; set; } = 500;
         public int タイムアウトms { get; set; } = 1000;
@@ -204,6 +214,9 @@ namespace Pings
             HasBeenDown = false;
             _isCurrentlyDown = false;
             _activeLogItem = null;
+
+            // ★リセット: 現在の障害中失敗回数もリセット★
+            _currentDisruptionFailureCount = 0;
         }
 
         // IV. 状態更新ロジック
@@ -230,6 +243,9 @@ namespace Pings
                             復旧日時 = DateTime.Now,
                             失敗時間mmss = duration.ToString(@"mm\:ss"),
 
+                            // ★障害中の失敗回数をログにセット★
+                            失敗回数 = _currentDisruptionFailureCount,
+
                             // Down前の統計
                             Down前平均ms = _snapAvg,
                             Down前最小ms = _snapMin,
@@ -251,6 +267,9 @@ namespace Pings
                     _currentSessionCount = 0;
                     _currentSessionMin = 0;
                     _currentSessionMax = 0;
+
+                    // ★リセット: 障害中カウンタをクリア★
+                    _currentDisruptionFailureCount = 0;
 
                     _isCurrentlyDown = false;
                 }
@@ -310,10 +329,16 @@ namespace Pings
 
                     _continuousDownStartTime = DateTime.Now;
                     _isCurrentlyDown = true;
+
+                    // 障害カウントを開始（最初は0だったのでここで初期化は不要だが明示的に）
+                    _currentDisruptionFailureCount = 0;
                 }
 
                 // Down継続中も毎回実行するべき処理
                 失敗回数++;
+                // ★障害中カウントをインクリメント★
+                _currentDisruptionFailureCount++;
+
                 時間ms = 0;
                 ステータス = "Down";
                 IsUp = false;
@@ -377,7 +402,13 @@ namespace Pings
             SetupMenuStrip();
 
             monitorList = new BindingList<PingMonitorItem>();
+            // 追加: 変更検知と UI イベントをフック
+            monitorList.ListChanged += MonitorList_ListChanged;
             dgvMonitor.DataSource = monitorList;
+
+            // DataGridView のユーザーによる削除や行確定を補足
+            dgvMonitor.UserDeletedRow += DgvMonitor_UserDeletedRow;
+            dgvMonitor.RowValidated += DgvMonitor_RowValidated;
 
             dgvMonitor.DefaultValuesNeeded += DgvMonitor_DefaultValuesNeeded;
             this.FormClosing += Form1_FormClosing;
@@ -473,30 +504,46 @@ namespace Pings
         }
 
         private void BtnPingStart_Click(object sender, EventArgs e)
+{
+    // 1. 既に監視が開始されていたら、一度停止させる（再開時の安全策）
+    StopMonitoring();
+    ClearVeiw();
+
+    // 2. DataGridViewの編集内容を確定
+    dgvMonitor.EndEdit();
+
+    // 3. 空欄行を除外
+    var validItems = monitorList
+        .Where(i => !string.IsNullOrWhiteSpace(i.対象アドレス) || !string.IsNullOrWhiteSpace(i.Host名))
+        .ToList();
+
+    monitorList.ListChanged -= MonitorList_ListChanged;
+    try
+    {
+        monitorList.Clear();
+        foreach (var item in validItems)
         {
-            // 1. 既に監視が開始されていたら、一度停止させる（再開時の安全策）
-            StopMonitoring();
-            ClearVeiw();
-
-            // 2. DataGridViewの編集内容を確定
-            // ユーザーがアドレスを入力中だった場合、この操作でリストに反映される
-            dgvMonitor.EndEdit();
-
-            // 3. 次の新規行の「順番」を決定
-            if (monitorList.Any())
-            {
-                // 既存の最大の順番+1を設定
-                _nextIndex = monitorList.Max(i => i.順番) + 1;
-            }
-            else
-            {
-                _nextIndex = 1;
-            }
-
-
-            // 4. Ping監視の開始
-            StartMonitoring();
+            monitorList.Add(item);
         }
+    }
+    finally
+    {
+        monitorList.ListChanged += MonitorList_ListChanged;
+    }
+
+    // 4. 次の新規行の「順番」を決定
+    if (monitorList.Any())
+    {
+        _nextIndex = monitorList.Max(i => i.順番) + 1;
+    }
+    else
+    {
+        _nextIndex = 1;
+    }
+
+    // 5. Ping監視の開始
+    StartMonitoring();
+}
 
         private void BtnStop_Click(object sender, EventArgs e)
         {
@@ -558,7 +605,9 @@ namespace Pings
         {
             if (e.Row.IsNewRow)
             {
+                // 表示用に次の番号を割り当て、重複を避けるためにインクリメントする
                 e.Row.Cells[1].Value = _nextIndex;
+                _nextIndex++;
             }
         }
 
@@ -798,7 +847,7 @@ namespace Pings
                             sw.WriteLine("--- 監視統計 ---");
 
                             // ヘッダー行
-                            string header = "ｽﾃｰﾀｽ,順番,対象アドレス,Host名,送信回数,失敗回数,連続失敗回数,連続失敗時間[mm:ss],最大失敗時間[mm:ss],時間[ms],平均値[ms],最小値[ms],最大値[ms]";
+                            string header = "ｽﾃｰﾀｽ,順番,対象アドレス,Host名,送信回数,失敗回数,連続失敗回数,連続失敗時間[hh:mm:ss],最大失敗時間[hh:mm:ss],時間[ms],平均値[ms],最小値[ms],最大値[ms]";
                             sw.WriteLine(header);
 
                             // データ行
@@ -831,8 +880,8 @@ namespace Pings
 
                             if (disruptionLogList.Any())
                             {
-                                // ヘッダー行
-                                string logHeader = "対象アドレス,Host名,Down開始日時,復旧日時,失敗時間[mm:ss]," +
+                                // ヘッダー行（失敗回数を追加）
+                                string logHeader = "対象アドレス,Host名,Down開始日時,復旧日時,失敗回数,失敗時間[hh:mm:ss]," +
                                                    "Down前平均[ms],Down前最小[ms],Down前最大[ms]," +
                                                    "復旧後平均[ms],復旧後最小[ms],復旧後最大[ms]";
                                 sw.WriteLine(logHeader);
@@ -845,6 +894,7 @@ namespace Pings
                                         logItem.Host名,
                                         logItem.Down開始日時.ToString("yyyy/MM/dd HH:mm:ss"),
                                         logItem.復旧日時.ToString("yyyy/MM/dd HH:mm:ss"),
+                                        logItem.失敗回数,
                                         logItem.失敗時間mmss,
                                         // 平均値はF1形式で出力
                                         $"{logItem.Down前平均ms:F1}",
@@ -879,7 +929,75 @@ namespace Pings
             }
         }
 
+        // monitorList の変更（追加・削除・リセット）を受けて順番を再計算する
+        private void MonitorList_ListChanged(object sender, ListChangedEventArgs e)
+        {
+            if (e.ListChangedType == ListChangedType.ItemAdded ||
+                e.ListChangedType == ListChangedType.ItemDeleted ||
+                e.ListChangedType == ListChangedType.Reset)
+            {
+                RecalculateOrderNumbers();
+            }
+        }
 
+        // DataGridView で行を削除したとき（DELキー等）
+        private void DgvMonitor_UserDeletedRow(object sender, DataGridViewRowEventArgs e)
+        {
+            RecalculateOrderNumbers();
+        }
+
+        // 行の編集確定後に呼んでおく（新規行コミットの補助）
+        private void DgvMonitor_RowValidated(object sender, DataGridViewCellEventArgs e)
+        {
+            // 小コストなので常に再計算して差し支えありません
+            RecalculateOrderNumbers();
+        }
+
+        // 実際に順番を詰めて UI を更新するメソッド
+        private bool _isRecalculating = false;
+
+private void RecalculateOrderNumbers()
+{
+    if (_isRecalculating) return; // 再入時は即座に抜ける
+    _isRecalculating = true;
+
+    // 再入/再帰防止：イベントを一時解除
+    monitorList.ListChanged -= MonitorList_ListChanged;
+    try
+    {
+        for (int i = 0; i < monitorList.Count; i++)
+        {
+            monitorList[i].順番 = i + 1;
+        }
+        _nextIndex = monitorList.Count + 1;
+
+        try
+        {
+            if (dgvMonitor.IsHandleCreated)
+            {
+                dgvMonitor.Invoke((MethodInvoker)delegate
+                {
+                    monitorList.ResetBindings();
+                    dgvMonitor.Refresh();
+                });
+            }
+            else
+            {
+                monitorList.ResetBindings();
+            }
+        }
+        catch
+        {
+            // UI スレッドが破棄されている等は無視
+        }
+    }
+    finally
+    {
+        // 忘れずに再登録
+        monitorList.ListChanged += MonitorList_ListChanged;
+        _isRecalculating = false;
+    }
+}
         private void AddDisruptionLogItem(DisruptionLogItem item)
         {
             if (this.InvokeRequired)
@@ -1054,7 +1172,7 @@ namespace Pings
             {
                 Dock = DockStyle.Fill,
                 AutoGenerateColumns = false,
-                BackgroundColor = SystemColors.ControlLightLight,
+                BackgroundColor = SystemColors.ControlLight,
                 RowHeadersVisible = false,
                 SelectionMode = DataGridViewSelectionMode.FullRowSelect
             };
@@ -1068,7 +1186,7 @@ namespace Pings
                 Dock = DockStyle.Fill,
                 AutoGenerateColumns = false,
                 ReadOnly = true,
-                BackgroundColor = SystemColors.ControlLightLight,
+                BackgroundColor = SystemColors.ControlLight,
                 RowHeadersVisible = false,
                 SelectionMode = DataGridViewSelectionMode.FullRowSelect,
                 AllowUserToDeleteRows = false,
@@ -1124,8 +1242,8 @@ namespace Pings
             dgvMonitor.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "送信回数", HeaderText = "送信回数", Width = 80, ReadOnly = true });
             dgvMonitor.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "失敗回数", HeaderText = "失敗回数", Width = 80, ReadOnly = true });
             dgvMonitor.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "連続失敗回数", HeaderText = "連続失敗回数", Width = 80, ReadOnly = true });
-            dgvMonitor.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "連続失敗時間s", HeaderText = "連続失敗時間[mm:ss]", Width = 130, ReadOnly = true });
-            dgvMonitor.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "最大失敗時間s", HeaderText = "最大失敗時間[mm:ss]", Width = 130, ReadOnly = true });
+            dgvMonitor.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "連続失敗時間s", HeaderText = "連続失敗時間[hh:mm:ss]", Width = 130, DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleRight, Format = @"hh\:mm\:ss" }, ReadOnly = true });
+            dgvMonitor.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "最大失敗時間s", HeaderText = "最大失敗時間[hh:mm:ss]", Width = 130, DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleRight, Format = @"hh\:mm\:ss" }, ReadOnly = true });
             dgvMonitor.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "時間ms", HeaderText = "時間[ms]", Width = 80, ReadOnly = true });
             dgvMonitor.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "平均値ms", HeaderText = "平均値[ms]", Width = 80, DefaultCellStyle = new DataGridViewCellStyle { Format = "F1" }, ReadOnly = true });
             dgvMonitor.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "最小値ms", HeaderText = "最小値[ms]", Width = 80, ReadOnly = true });
@@ -1167,7 +1285,8 @@ namespace Pings
             dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Host名", HeaderText = "Host名", Width = 120 });
             dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Down開始日時", HeaderText = "Down開始日時", Width = 150, DefaultCellStyle = new DataGridViewCellStyle { Format = "yyyy/MM/dd HH:mm:ss" } });
             dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "復旧日時", HeaderText = "復旧日時", Width = 150, DefaultCellStyle = new DataGridViewCellStyle { Format = "yyyy/MM/dd HH:mm:ss" } });
-            dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "失敗時間mmss", HeaderText = "失敗時間[mm:ss]", Width = 100, DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleRight } });
+            dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "失敗回数", HeaderText = "失敗回数", Width = 80, ReadOnly = true });
+            dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "失敗時間mmss", HeaderText = "失敗時間[hh:mm:ss]", Width = 100, DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleRight,Format = @"hh\:mm\:ss" } });
 
             // Down前の統計
             dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Down前平均ms", HeaderText = "Down前平均[ms]", Width = 110, DefaultCellStyle = new DataGridViewCellStyle { Format = "F1", Alignment = DataGridViewContentAlignment.MiddleRight } });
@@ -1193,8 +1312,8 @@ namespace Pings
             if (currentSortColumn != null && newColumn.DataPropertyName == currentSortColumn.DataPropertyName)
             {
                 // 同じカラムを再度クリックした場合、ソート方向を反転させる
-                direction = (currentSortDirection == ListSortDirection.Ascending) ?
-                            ListSortDirection.Descending :
+                direction = (currentSortDirection == ListSortDirection.Ascending) ? 
+                            ListSortDirection.Descending : 
                             ListSortDirection.Ascending;
             }
             else
