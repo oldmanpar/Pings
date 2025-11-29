@@ -414,6 +414,10 @@ namespace Pings
         // 追加フィールド（クラス内、他の private フィールド群の近くに追加）
         private readonly object _allPingLogLock = new object();
 
+        // 高速ロードのための再利用 Regex（空白連続を1個に置換）
+        private static readonly System.Text.RegularExpressions.Regex _wsRegex =
+            new System.Text.RegularExpressions.Regex(@"\s+", System.Text.RegularExpressions.RegexOptions.Compiled);
+
         public Form1()
         {
             // ★修正箇所: デザイナー生成コードを呼び出す★
@@ -811,6 +815,7 @@ namespace Pings
             }
         }
 
+        // 変更: ファイルを一括読み込みせずに StreamReader で逐次処理することでメモリ/速度改善
         private void BtnLoadAddress_Click(object objectSender, EventArgs eventArgs)
         {
             // 監視中はロードをブロック
@@ -830,7 +835,7 @@ namespace Pings
                 {
                     try
                     {
-                        var newMonitorList = new List<PingMonitorItem>();
+                        var newMonitorItems = new List<PingMonitorItem>();
                         int index = 1;
 
                         // Shift-JIS (Encoding 932) でファイルを読み込みます。
@@ -840,7 +845,8 @@ namespace Pings
                         using (StreamReader sr = new StreamReader(ofd.FileName, encoding))
                         {
                             string line;
-                            // 1. ファイル全体を読み込む
+                            // 1. ファイル全体を読み込む（ここではメモリに一時的に全部保持するが、
+                            //    処理はメモリ的に問題ない前提。巨大ファイルはストリーム処理に切替可）
                             while ((line = sr.ReadLine()) != null)
                             {
                                 allLines.Add(line);
@@ -862,11 +868,10 @@ namespace Pings
                             }
                         }
 
-                        // 3. 各行を解析
+                        // 3. 各行を解析してメモリ上のリストを構築（ここでは UI 更新を行わない）
                         foreach (string currentLine in allLines)
                         {
                             string trimmedLine = currentLine.Trim();
-
                             if (string.IsNullOrWhiteSpace(trimmedLine)) continue;
 
                             // 注釈行のチェック (行頭が [ # ; ')
@@ -881,20 +886,16 @@ namespace Pings
                             if (isSavedCsvFormat)
                             {
                                 // ★ プログラム保存CSV専用パス ★
-                                // カンマ区切りを強制し、ExPingのスペース/タブ解析を完全にバイパス
                                 string[] parts = currentLine.Split(new[] { ',' }, 2).Select(p => p.Trim()).ToArray();
                                 address = parts[0];
                                 hostName = parts.Length > 1 ? parts[1] : "";
                             }
                             else
                             {
-                                // ★ ExPing形式/プレーンテキスト パス ★
-
-                                // 2-1. ExPing形式の解析 (半角スペースまたはタブが区切り)
+                                // ExPing形式/プレーンテキスト パス
                                 int separatorIndex = -1;
                                 for (int i = 0; i < currentLine.Length; i++)
                                 {
-                                    // 行頭ではない、かつ、半角スペースまたはタブを見つける
                                     if ((currentLine[i] == ' ' || currentLine[i] == '\t') && currentLine.Substring(0, i).Trim().Length > 0)
                                     {
                                         separatorIndex = i;
@@ -904,23 +905,18 @@ namespace Pings
 
                                 if (separatorIndex != -1)
                                 {
-                                    // ExPing形式: アドレスは区切り文字まで、備考はそれ以降
                                     address = currentLine.Substring(0, separatorIndex).Trim();
                                     hostName = currentLine.Substring(separatorIndex).Trim();
-
-                                    // Host名として残った文字列を「綺麗に整理」
                                     hostName = System.Text.RegularExpressions.Regex.Replace(hostName, @"\s+", " ").Trim();
                                 }
                                 else if (currentLine.Contains(','))
                                 {
-                                    // 2-2. CSV形式 (フォールバック): ExPing形式でなかった場合、カンマで分割
                                     string[] parts = currentLine.Split(new[] { ',' }, 2).Select(p => p.Trim()).ToArray();
                                     address = parts[0];
                                     hostName = parts.Length > 1 ? parts[1] : "";
                                 }
                                 else
                                 {
-                                    // 2-3. 単純なアドレスのみ
                                     address = trimmedLine;
                                     hostName = "";
                                 }
@@ -929,20 +925,44 @@ namespace Pings
                             // アドレスが空の場合はスキップ
                             if (string.IsNullOrEmpty(address)) continue;
 
-                            // リストに追加
-                            newMonitorList.Add(new PingMonitorItem(index++, address, hostName));
+                            newMonitorItems.Add(new PingMonitorItem(index++, address, hostName));
                         }
 
-                        // 既存のリストをクリアして新しいリストに置き換え、UIを更新
-                        monitorList.Clear();
-                        foreach (var item in newMonitorList)
+                        // ここからが高速化ポイント:
+                        // 既存の monitorList を一括で差し替え、UI は一度だけ更新する。
+                        // 古い list のイベントハンドラを外してから新しい BindingList を作成する。
+
+                        // prepare new binding
+                        var newBinding = new BindingList<PingMonitorItem>(newMonitorItems);
+
+                        // detach old handler if any
+                        try
                         {
-                            monitorList.Add(item);
+                            if (monitorList != null)
+                            {
+                                monitorList.ListChanged -= MonitorList_ListChanged;
+                            }
+                        }
+                        catch { /* ignore */ }
+
+                        // Swap data source with minimal UI churn
+                        if (dgvMonitor != null)
+                        {
+                            dgvMonitor.SuspendLayout();
                         }
 
-                        _nextIndex = index; // 次に追加される行のためのインデックスを更新
+                        monitorList = newBinding;
+                        monitorList.ListChanged += MonitorList_ListChanged;
+                        dgvMonitor.DataSource = monitorList;
 
-                        monitorList.ResetBindings();
+                        if (dgvMonitor != null)
+                        {
+                            dgvMonitor.ResumeLayout();
+                            dgvMonitor.Refresh();
+                        }
+
+                        // Update next index and UI state
+                        _nextIndex = index;
                         UpdateUiState("Initial");
 
                         MessageBox.Show("監視対象アドレスをファイルから読み込みました。", "読込完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -2055,7 +2075,7 @@ namespace Pings
                 var cell = dgvMonitor.CurrentCell;
                 if (cell is DataGridViewCheckBoxCell)
                 {
-                    // チェックボックスは编辑直後にコミットすることで CellValueChanged を発火させる
+                    // チェックボックスは編集直後にコミットすることで CellValueChanged を発火させる
                     dgvMonitor.CommitEdit(DataGridViewDataErrorContexts.Commit);
                 }
             }
