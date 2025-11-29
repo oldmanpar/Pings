@@ -408,6 +408,9 @@ namespace Pings
         // 追加: メニューでの自動保存チェックアイテム参照
         private ToolStripMenuItem mnuAutoSaveAllPing;
 
+        // 追加: メニューでの自動保存チェックアイテム参照
+        private ToolStripMenuItem mnuAutoSaveTraceroute;
+
         // 保存時の1ターゲットあたりの表示固定幅（px）。要件3に対応。
         private const int TracerouteColumnWidth = 600;
 
@@ -540,6 +543,7 @@ namespace Pings
         }
 
         // 変更済: Traceroute ボタン状態更新メソッド
+        // UpdateTracerouteButtons を修正：自動保存オン時に手動保存ボタンを無効にする
         private void UpdateTracerouteButtons()
         {
             if (btnTraceroute == null || btnSaveTraceroute == null || btnClearTraceroute == null || btnStopTraceroute == null) return;
@@ -556,13 +560,16 @@ namespace Pings
 
             // Traceroute 出力の有無で保存/クリアを制御（実行中は無効）
             bool hasTracerouteOutput = tracerouteTextBoxes != null && tracerouteTextBoxes.Values.Any(t => !string.IsNullOrEmpty(t.Text));
-            btnSaveTraceroute.Enabled = !_isTracerouteRunning && hasTracerouteOutput;
-            btnClearTraceroute.Enabled = !_isTracerouteRunning && hasTracerouteOutput; // 追加
+
+            // 自動保存が有効なときは手動保存ボタンを無効にする
+            bool autoSave = (mnuAutoSaveTraceroute != null && mnuAutoSaveTraceroute.Checked);
+
+            btnSaveTraceroute.Enabled = !_isTracerouteRunning && hasTracerouteOutput && !autoSave;
+            btnClearTraceroute.Enabled = !_isTracerouteRunning && hasTracerouteOutput; // クリアは自動保存時でも有効にしておく
 
             // 停止ボタンは実行中のみ有効
             btnStopTraceroute.Enabled = _isTracerouteRunning;
         }
-
         private void SetupMenuStrip()
         {
             // 既に MainMenuStrip が存在する場合はそれを再利用する
@@ -611,6 +618,11 @@ namespace Pings
             // 5) 全Ping結果を自動保存するチェックボックス
             mnuAutoSaveAllPing = new ToolStripMenuItem("全Ping結果を保存する") { CheckOnClick = true };
             optionsMenu.DropDownItems.Add(mnuAutoSaveAllPing);
+
+            // 追加: Traceroute 自動保存チェックボックス（初期値オフ）
+            mnuAutoSaveTraceroute = new ToolStripMenuItem("Trace結果の自動保存") { CheckOnClick = true, Checked = true };
+            mnuAutoSaveTraceroute.CheckedChanged += MnuAutoSaveTraceroute_CheckedChanged;
+            optionsMenu.DropDownItems.Add(mnuAutoSaveTraceroute);
 
             menuStrip.Items.Add(optionsMenu);
 
@@ -1101,6 +1113,56 @@ namespace Pings
         private void DgvMonitor_UserDeletedRow(object sender, DataGridViewRowEventArgs e)
         {
             RecalculateOrderNumbers();
+        }
+
+        // メニューのチェック変更ハンドラ（シンプルにUIを更新）
+        private void MnuAutoSaveTraceroute_CheckedChanged(object sender, EventArgs e)
+        {
+            // チェック切替時に手動保存ボタンの有効/無効を即時反映
+            UpdateTracerouteButtons();
+        }
+
+        // 自動保存の共通処理（追記）。BtnSaveTraceroute_Click と同じファイル名規則で保存するが UI はクリアしない。
+        private void SaveTracerouteOutputsAutoAppend()
+        {
+            if (tracerouteTextBoxes == null || tracerouteTextBoxes.Count == 0) return;
+
+            string folder = AppDomain.CurrentDomain.BaseDirectory;
+            try
+            {
+                foreach (var kv in tracerouteTextBoxes)
+                {
+                    string address = kv.Key;
+                    string content = kv.Value.Text;
+                    if (string.IsNullOrEmpty(content)) continue;
+
+                    // Host名を monitorList から取得（同一アドレスが複数ある場合は最初のものを使用）
+                    string hostName = monitorList?
+                        .FirstOrDefault(i => string.Equals(i.対象アドレス, address, StringComparison.OrdinalIgnoreCase))
+                        ?.Host名 ?? "";
+
+                    string safeAddress = SanitizeFileName(address);
+                    string safeHost = SanitizeFileName(hostName);
+                    string fileName = Path.Combine(folder, $"Traceroute_result_{DateTime.Now:yyyyMMdd}_{safeAddress}_{safeHost}.log");
+
+                    using (var sw = new StreamWriter(fileName, true, System.Text.Encoding.GetEncoding(932)))
+                    {
+                        sw.WriteLine("----------------------------------------------------------------");
+                        sw.WriteLine($"Saved: {DateTime.Now:yyyy/MM/dd HH:mm:ss}");
+                        sw.WriteLine(content);
+                        sw.WriteLine();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                // 自動保存の失敗はユーザーに通知する（必要ならログに落とす）
+                try
+                {
+                    MessageBox.Show($"Traceroute 自動保存中にエラーが発生しました:\n{ex.Message}", "保存エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+                catch { /* UIが無い場面では無視 */ }
+            }
         }
 
         // 行の編集確定後に呼んでおく（新規行コミットの補助）
@@ -1798,6 +1860,13 @@ namespace Pings
                 _isTracerouteRunning = false;
                 UpdateTracerouteButtons();
 
+                // 自動保存追加
+                if (mnuAutoSaveTraceroute != null && mnuAutoSaveTraceroute.Checked)
+                {
+                    // 自動保存は UI をクリアせずに追記保存する
+                    SaveTracerouteOutputsAutoAppend();
+                }
+
                 tracerouteCts?.Dispose();
                 tracerouteCts = null;
             }
@@ -1999,7 +2068,6 @@ namespace Pings
 
             // 実行ファイルと同じフォルダへ保存する仕様（要件1）
             string folder = AppDomain.CurrentDomain.BaseDirectory;
-
             try
             {
                 // 各対象アドレスごとにファイルを作成（追記モード）。ファイル名に使えない文字は置換。
