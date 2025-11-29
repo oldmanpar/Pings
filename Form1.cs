@@ -11,6 +11,7 @@ using System.Windows.Forms;
 using System.Reflection; // Reflection を使用するために追加
 using System.Diagnostics;
 using System.Collections.Concurrent;
+using System.Net;
 
 // ---------------------------------------------------------
 // 1. データ保持クラス (障害イベントログ)
@@ -404,6 +405,101 @@ namespace Pings
         private Button btnSaveTraceroute; // 追加: Traceroute 出力保存ボタン
         private Button btnClearTraceroute; // 追加: Traceroute 出力クリアボタン
         private Button btnStopTraceroute; // 追加: Traceroute 停止ボタン
+
+        // ---------------------------------------------------------
+        // 追加: インターフェイス選択用フィールド / ヘルパー / メソッド
+        // （Form1 クラス内のフィールド群のところに挿入してください）
+        // ---------------------------------------------------------
+        private ComboBox cmbInterface;
+        private Button btnRefreshInterfaces;
+        private System.Net.IPAddress _selectedLocalAddress;
+
+        /// <summary>
+        /// ComboBox に表示するためのラッパークラス
+        /// </summary>
+        private class NetworkInterfaceItem
+        {
+            public string Display { get; }
+            public System.Net.IPAddress Address { get; }
+
+            public NetworkInterfaceItem(string display, System.Net.IPAddress address)
+            {
+                Display = display;
+                Address = address;
+            }
+
+            public override string ToString() => Display;
+        }
+        /// <summary>
+        /// ネットワークインターフェイスとアドレスを列挙して ComboBox を更新します
+        /// </summary>
+        private void PopulateNetworkInterfaces()
+        {
+            try
+            {
+                if (cmbInterface == null) return;
+
+                cmbInterface.BeginUpdate();
+                try
+                {
+                    cmbInterface.Items.Clear();
+
+                    var ifaces = NetworkInterface.GetAllNetworkInterfaces()
+                        .Where(n => n.NetworkInterfaceType != NetworkInterfaceType.Loopback)
+                        .OrderByDescending(n => n.OperationalStatus == OperationalStatus.Up)
+                        .ThenBy(n => n.Name);
+
+                    foreach (var ni in ifaces)
+                    {
+                        var props = ni.GetIPProperties();
+                        if (props == null) continue;
+
+                        foreach (var ua in props.UnicastAddresses)
+                        {
+                            var addr = ua.Address;
+                            if (addr == null) continue;
+                            if (IPAddress.IsLoopback(addr)) continue;
+
+                            // 表示: "イーサネット0 (192.168.0.10) - Up"
+                            string display = $"{ni.Name} ({addr}) - {ni.OperationalStatus}";
+                            cmbInterface.Items.Add(new NetworkInterfaceItem(display, addr));
+                        }
+                    }
+
+                    // デフォルト選択: 優先 IPv4 の Up なアドレス、それがなければ最初の要素
+                    NetworkInterfaceItem defaultItem = null;
+                    foreach (var obj in cmbInterface.Items)
+                    {
+                        var it = obj as NetworkInterfaceItem;
+                        if (it == null) continue;
+                        if (it.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                        {
+                            defaultItem = it;
+                            break;
+                        }
+                    }
+                    if (defaultItem == null && cmbInterface.Items.Count > 0)
+                    {
+                        defaultItem = cmbInterface.Items[0] as NetworkInterfaceItem;
+                    }
+
+                    if (defaultItem != null)
+                    {
+                        cmbInterface.SelectedItem = defaultItem;
+                        _selectedLocalAddress = defaultItem.Address;
+                    }
+                }
+                finally
+                {
+                    cmbInterface.EndUpdate();
+                }
+            }
+            catch
+            {
+                // UI の問題で例外になっても破綻しないように黙殺
+            }
+        }
+
 
         // Traceroute専用キャンセルソース（Ping監視とは独立）
         private CancellationTokenSource tracerouteCts;
@@ -861,6 +957,19 @@ namespace Pings
                     // 無視
                 }
             }
+        }
+
+        private void CmbInterface_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            var item = cmbInterface.SelectedItem as NetworkInterfaceItem;
+            _selectedLocalAddress = item?.Address;
+            // 注意: System.Net.NetworkInformation.Ping には送信元インターフェイスを直接指定する API がないため、
+            // この選択は将来の実装や表示用に保持します。
+        }
+
+        private void BtnRefreshInterfaces_Click(object sender, EventArgs e)
+        {
+            PopulateNetworkInterfaces();
         }
 
         private void BtnSaveAddress_Click(object sender, EventArgs e)
@@ -1465,6 +1574,23 @@ namespace Pings
             topPanel.Controls.Add(cmbInterval);
             topPanel.Controls.Add(lblTimeout);
             topPanel.Controls.Add(cmbTimeout);
+
+            /* 追加するコード例（そのままコピーして InitializeCustomComponents 内に貼ってください） */
+            Label lblInterface = new Label { Text = "送信インターフェイス", Location = new Point(600, 5), AutoSize = true };
+            cmbInterface = new ComboBox { Location = new Point(600, 23), Width = 240, DropDownStyle = ComboBoxStyle.DropDownList };
+            btnRefreshInterfaces = new Button { Text = "更新", Location = new Point(848, 22), Width = 50 };
+
+            // イベント登録
+            cmbInterface.SelectedIndexChanged += CmbInterface_SelectedIndexChanged;
+            btnRefreshInterfaces.Click += BtnRefreshInterfaces_Click;
+
+            // topPanel に追加
+            topPanel.Controls.Add(lblInterface);
+            topPanel.Controls.Add(cmbInterface);
+            topPanel.Controls.Add(btnRefreshInterfaces);
+
+            // 初期一覧読み込み
+            PopulateNetworkInterfaces();
 
             // content panel
             Panel contentPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0) };
