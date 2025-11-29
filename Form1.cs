@@ -216,6 +216,11 @@ namespace Pings
             _isCurrentlyDown = false;
             _activeLogItem = null;
 
+            // 表示用項目も初期化（起動直後と同じ状態にする）
+            ステータス = "";                 // ステータスを空にする（起動時と同じ見た目）
+            連続失敗時間s = "";             // 表示用時間文字列をクリア
+            最大失敗時間s = "";             // 表示用最大時間文字列をクリア
+
             // ★リセット: 現在の障害中失敗回数もリセット★
             _currentDisruptionFailureCount = 0;
         }
