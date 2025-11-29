@@ -388,11 +388,19 @@ namespace Pings
 
         private Button btnTraceroute; // 追加: Traceroute実行ボタン
         private TabPage traceroutePage; // 追加: Traceroute タブ
-        private TextBox txtTracerouteOutput; // 追加: 出力表示用 TextBox
+
+        // 変更: 単一 TextBox -> 複数列表示用パネル + TextBox 持ち分
+        private TableLayoutPanel traceroutePanel;
+        private Dictionary<string, TextBox> tracerouteTextBoxes;
+
         private SemaphoreSlim tracerouteSemaphore = new SemaphoreSlim(4); // 追加: 同時実行制限（任意で調整）
 
         private Button btnSaveTraceroute; // 追加: Traceroute 出力保存ボタン
         private Button btnClearTraceroute; // 追加: Traceroute 出力クリアボタン
+        private Button btnStopTraceroute; // 追加: Traceroute 停止ボタン
+
+        // Traceroute専用キャンセルソース（Ping監視とは独立）
+        private CancellationTokenSource tracerouteCts;
 
         // 追加: フィールド（他の private フィールド群の近く）
         private volatile bool _isTracerouteRunning = false;
@@ -485,7 +493,7 @@ namespace Pings
                 }
             }
 
-            // Traceroute ボタン制御（既存）
+            // Traceroute ボタン制御（既存） + 停止ボタン
             if (btnTraceroute != null)
             {
                 if (state != "Running")
@@ -522,7 +530,7 @@ namespace Pings
         // 変更済: Traceroute ボタン状態更新メソッド
         private void UpdateTracerouteButtons()
         {
-            if (btnTraceroute == null || btnSaveTraceroute == null || btnClearTraceroute == null) return;
+            if (btnTraceroute == null || btnSaveTraceroute == null || btnClearTraceroute == null || btnStopTraceroute == null) return;
 
             if (this.InvokeRequired)
             {
@@ -535,9 +543,12 @@ namespace Pings
             btnTraceroute.Enabled = hasCheckedTrace && !_isTracerouteRunning;
 
             // Traceroute 出力の有無で保存/クリアを制御（実行中は無効）
-            bool hasTracerouteOutput = !string.IsNullOrEmpty(txtTracerouteOutput?.Text);
+            bool hasTracerouteOutput = tracerouteTextBoxes != null && tracerouteTextBoxes.Values.Any(t => !string.IsNullOrEmpty(t.Text));
             btnSaveTraceroute.Enabled = !_isTracerouteRunning && hasTracerouteOutput;
             btnClearTraceroute.Enabled = !_isTracerouteRunning && hasTracerouteOutput; // 追加
+
+            // 停止ボタンは実行中のみ有効
+            btnStopTraceroute.Enabled = _isTracerouteRunning;
         }
 
         private void SetupMenuStrip()
@@ -1203,6 +1214,20 @@ namespace Pings
 
             // ログのソートインジケータもリセット
             ResetLogSortIndicators();
+
+            // Traceroute 関連もクリア
+            tracerouteTextBoxes?.Clear();
+            if (traceroutePanel != null)
+            {
+                if (traceroutePanel.InvokeRequired)
+                {
+                    traceroutePanel.Invoke(new Action(() => traceroutePanel.Controls.Clear()));
+                }
+                else
+                {
+                    traceroutePanel.Controls.Clear();
+                }
+            }
         }
 
         private async Task RunPingLoopAsync(PingMonitorItem item, CancellationToken token, Action<DisruptionLogItem> logAction)
@@ -1300,16 +1325,17 @@ namespace Pings
             tabControl.Controls.Add(logPage);
 
             traceroutePage = new TabPage("Traceroute");
-            txtTracerouteOutput = new TextBox
+
+            // Traceroute 用の TableLayoutPanel を用意し、実行時に列を追加していく設計
+            traceroutePanel = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
-                Multiline = true,
-                ReadOnly = true,
-                ScrollBars = ScrollBars.Both,
-                Font = new Font(FontFamily.GenericMonospace, 9f),
-                BackColor = SystemColors.Window
+                AutoScroll = true,
+                CellBorderStyle = TableLayoutPanelCellBorderStyle.Single,
+                ColumnCount = 1,
+                RowCount = 1
             };
-            traceroutePage.Controls.Add(txtTracerouteOutput);
+            traceroutePage.Controls.Add(traceroutePanel);
             tabControl.Controls.Add(traceroutePage);
 
             contentPanel.Controls.Add(tabControl);
@@ -1324,6 +1350,7 @@ namespace Pings
             btnTraceroute = new Button { Text = "Traceroute実行", Location = new Point(400, 5), Width = 120 };
             btnSaveTraceroute = new Button { Text = "Traceroute保存", Location = new Point(530, 5), Width = 120 };
             btnClearTraceroute = new Button { Text = "Tracerouteクリア", Location = new Point(660, 5), Width = 110 };
+            btnStopTraceroute = new Button { Text = "Traceroute停止", Location = new Point(785, 5), Width = 120 };
             btnExit = new Button { Text = "終了", Location = new Point(this.ClientSize.Width - 90, 5), Width = 80, Anchor = AnchorStyles.Right };
 
             bottomPanel.Controls.Add(btnPingStart);
@@ -1333,6 +1360,7 @@ namespace Pings
             bottomPanel.Controls.Add(btnTraceroute);
             bottomPanel.Controls.Add(btnSaveTraceroute);
             bottomPanel.Controls.Add(btnClearTraceroute); // 追加
+            bottomPanel.Controls.Add(btnStopTraceroute); // 追加: Traceroute停止ボタン
             bottomPanel.Controls.Add(btnExit);
 
             // add to form
@@ -1353,7 +1381,7 @@ namespace Pings
             btnTraceroute.Click += BtnTraceroute_Click;
             btnSaveTraceroute.Click += BtnSaveTraceroute_Click;
             btnClearTraceroute.Click += BtnClearTraceroute_Click;
-
+            btnStopTraceroute.Click += BtnStopTraceroute_Click;
 
             // ensure menu spacing
             int menuHeight = 0;
@@ -1364,6 +1392,7 @@ namespace Pings
             contentPanel.Padding = new Padding(0, menuHeight, 0, 0);
 
             // initial traceroute button state
+            tracerouteTextBoxes = new Dictionary<string, TextBox>(StringComparer.OrdinalIgnoreCase);
             UpdateTracerouteButtons();
         }
 
@@ -1551,31 +1580,84 @@ namespace Pings
             _isTracerouteRunning = true;
             UpdateTracerouteButtons();
 
-            // Tracerouteタブを選択して出力をクリア
+            // Tracerouteタブを選択して出力をクリアし、列ごとに TextBox を作成
             tabControl.SelectedTab = traceroutePage;
-            AppendTracerouteOutput($"== Traceroute: {DateTime.Now:yyyy/MM/dd HH:mm:ss} ==\r\n", true);
+            tracerouteTextBoxes.Clear();
+            traceroutePanel.Controls.Clear();
 
-            // Ping 監視の CTS を使うが、未開始の場合は None 를使用します。
-            var token = cts?.Token ?? CancellationToken.None;
+            // 列数を targets.Count に設定
+            int colCount = Math.Max(1, targets.Count);
+            traceroutePanel.ColumnCount = colCount;
+            traceroutePanel.RowCount = 1;
+            traceroutePanel.ColumnStyles.Clear();
+            for (int i = 0; i < colCount; i++)
+            {
+                traceroutePanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / colCount));
+            }
+
+            // 各ターゲットに対して縦にラベル + TextBox を作る
+            for (int i = 0; i < targets.Count; i++)
+            {
+                string address = targets[i];
+
+                var container = new Panel { Dock = DockStyle.Fill, Padding = new Padding(2) };
+
+                var lbl = new Label
+                {
+                    Text = address,
+                    Dock = DockStyle.Top,
+                    Height = 18,
+                    TextAlign = ContentAlignment.MiddleLeft,
+                    AutoEllipsis = true
+                };
+
+                var tb = new TextBox
+                {
+                    Multiline = true,
+                    ReadOnly = true,
+                    ScrollBars = ScrollBars.Both,
+                    Font = new Font(FontFamily.GenericMonospace, 9f),
+                    Dock = DockStyle.Fill,
+                    BackColor = SystemColors.Window
+                };
+
+                container.Controls.Add(tb);
+                container.Controls.Add(lbl);
+
+                traceroutePanel.Controls.Add(container, i, 0);
+                tracerouteTextBoxes[address] = tb;
+            }
+
+            // 共通ヘッダ（全列に表示）を出力
+            AppendTracerouteOutputToAll($"== Traceroute: {DateTime.Now:yyyy/MM/dd HH:mm:ss} ==\r\n", true);
+
+            // Traceroute専用 CTS（Ping の cts と連動させるが独立してキャンセル可能）
+            tracerouteCts?.Dispose();
+            tracerouteCts = CancellationTokenSource.CreateLinkedTokenSource(cts?.Token ?? CancellationToken.None);
+
+            var token = tracerouteCts.Token;
 
             try
             {
                 await RunTracerouteForAddressesAsync(targets, token);
-                AppendTracerouteOutput("=== Traceroute 完了 ===\r\n\r\n", true);
+                AppendTracerouteOutputToAll("=== Traceroute 完了 ===\r\n\r\n", true);
             }
             catch (OperationCanceledException)
             {
-                AppendTracerouteOutput("=== Traceroute はキャンセルされました ===\r\n\r\n", true);
+                AppendTracerouteOutputToAll("=== Traceroute はキャンセルされました ===\r\n\r\n", true);
             }
             catch (Exception ex)
             {
-                AppendTracerouteOutput($"--- エラー: {ex.Message} ---\r\n\r\n", true);
+                AppendTracerouteOutputToAll($"--- エラー: {ex.Message} ---\r\n\r\n", true);
             }
             finally
             {
                 // 実行終了後にフラグを戻してボタンを更新
                 _isTracerouteRunning = false;
                 UpdateTracerouteButtons();
+
+                tracerouteCts?.Dispose();
+                tracerouteCts = null;
             }
         }
 
@@ -1612,7 +1694,8 @@ namespace Pings
 
             string arguments = $"-d -w {tryTimeoutMs} {address}";
 
-            AppendTracerouteOutput($"--- tracert {address} (timeout={tryTimeoutMs}ms) ---\r\n", true);
+            // 各アドレスごとに見出し行をセット
+            AppendTracerouteOutput(address, $"--- tracert {address} (timeout={tryTimeoutMs}ms) ---\r\n", true);
 
             var psi = new ProcessStartInfo
             {
@@ -1630,39 +1713,55 @@ namespace Pings
                 {
                     proc.Start();
 
-                    // 非同期で全出力を読み取る（長時間になる可能性あり）
-                    Task<string> readTask = proc.StandardOutput.ReadToEndAsync();
-
-                    // 監視用キャンセルを監視。キャンセル時はプロセスを強制終了する。
-                    using (token.Register(() =>
+                    // StandardOutput を逐次読み取り、1行到着ごとに UI へ反映する
+                    using (var reader = proc.StandardOutput)
                     {
-                        try
+                        // キャンセル時にプロセスを強制終了する登録
+                        using (token.Register(() =>
                         {
-                            if (!proc.HasExited)
+                            try
                             {
-                                proc.Kill();
+                                if (!proc.HasExited)
+                                {
+                                    proc.Kill();
+                                }
+                            }
+                            catch { /* ignore */ }
+                        }))
+                        {
+                            while (!reader.EndOfStream && !token.IsCancellationRequested)
+                            {
+                                string line;
+                                try
+                                {
+                                    line = await reader.ReadLineAsync().ConfigureAwait(false);
+                                }
+                                catch (Exception exRead)
+                                {
+                                    line = $"(出力取得エラー: {exRead.Message})";
+                                }
+
+                                if (line == null) break;
+
+                                // 1行到着ごとにアドレス別 TextBox へ追加（タイムスタンプは先頭行のみ）
+                                AppendTracerouteOutput(address, line + Environment.NewLine, false);
                             }
                         }
-                        catch { /* ignore */ }
-                    }))
-                    {
-                        string output;
-                        try
-                        {
-                            output = await readTask.ConfigureAwait(false);
-                        }
-                        catch (Exception exRead)
-                        {
-                            output = $"(出力取得エラー: {exRead.Message})";
-                        }
-
-                        // UI に出力を追加
-                        AppendTracerouteOutput(output + "\r\n", false);
                     }
+
+                    // プロセス終了を待つ（既に終了していることが多い）
+                    try
+                    {
+                        if (!proc.HasExited)
+                        {
+                            proc.WaitForExit(1000);
+                        }
+                    }
+                    catch { }
                 }
                 catch (Exception ex)
                 {
-                    AppendTracerouteOutput($"(tracert 実行エラー: {ex.Message})\r\n", false);
+                    AppendTracerouteOutput(address, $"(tracert 実行エラー: {ex.Message})\r\n", false);
                 }
                 finally
                 {
@@ -1674,34 +1773,78 @@ namespace Pings
             }
         }
 
-        private void AppendTracerouteOutput(string text, bool keepTimestamp)
+        /// <summary>
+        /// 指定したアドレスの出力領域へ1行ずつ追加する。アドレスごとに分割表示するためのメソッド。
+        /// </summary>
+        private void AppendTracerouteOutput(string address, string text, bool keepTimestamp)
         {
-            if (txtTracerouteOutput.InvokeRequired)
+            if (string.IsNullOrEmpty(address))
             {
-                txtTracerouteOutput.Invoke(new Action<string, bool>(AppendTracerouteOutput), text, keepTimestamp);
+                // フォールバック: 全列へ出力
+                AppendTracerouteOutputToAll(text, keepTimestamp);
+                return;
+            }
+
+            if (tracerouteTextBoxes == null || !tracerouteTextBoxes.ContainsKey(address))
+            {
+                // 未作成ならフォールバックで全体に出力
+                AppendTracerouteOutputToAll(text, keepTimestamp);
+                return;
+            }
+
+            var tb = tracerouteTextBoxes[address];
+            if (tb == null) return;
+
+            if (tb.InvokeRequired)
+            {
+                tb.Invoke(new Action<string, string, bool>(AppendTracerouteOutput), address, text, keepTimestamp);
                 return;
             }
 
             if (keepTimestamp)
             {
-                txtTracerouteOutput.AppendText($"[{DateTime.Now:HH:mm:ss}] ");
+                tb.AppendText($"[{DateTime.Now:HH:mm:ss}] ");
             }
-            txtTracerouteOutput.AppendText(text);
-            // スクロールを末尾へ
-            txtTracerouteOutput.SelectionStart = txtTracerouteOutput.Text.Length;
-            txtTracerouteOutput.ScrollToCaret();
+            tb.AppendText(text);
+            tb.SelectionStart = tb.Text.Length;
+            tb.ScrollToCaret();
 
-            // 出力が存在する場合に保存ボタンを有効化。ただし Traceroute 実行中なら無効
-            if (btnSaveTraceroute != null)
+            // 保存/クリア/実行ボタン状態更新
+            UpdateTracerouteButtons();
+        }
+
+        /// <summary>
+        /// 全てのトレーサウト領域に同報で出力する（ヘッダーなど）。
+        /// </summary>
+        private void AppendTracerouteOutputToAll(string text, bool keepTimestamp)
+        {
+            if (tracerouteTextBoxes == null || tracerouteTextBoxes.Count == 0) return;
+
+            foreach (var kv in tracerouteTextBoxes)
             {
-                btnSaveTraceroute.Enabled = !_isTracerouteRunning && !string.IsNullOrEmpty(txtTracerouteOutput.Text);
+                var tb = kv.Value;
+                if (tb == null) continue;
+
+                if (tb.InvokeRequired)
+                {
+                    tb.Invoke(new Action<string, bool>((t, k) =>
+                    {
+                        if (k) tb.AppendText($"[{DateTime.Now:HH:mm:ss}] ");
+                        tb.AppendText(t);
+                        tb.SelectionStart = tb.Text.Length;
+                        tb.ScrollToCaret();
+                    }), text, keepTimestamp);
+                }
+                else
+                {
+                    if (keepTimestamp) tb.AppendText($"[{DateTime.Now:HH:mm:ss}] ");
+                    tb.AppendText(text);
+                    tb.SelectionStart = tb.Text.Length;
+                    tb.ScrollToCaret();
+                }
             }
 
-            // 実行条件に応じて Traceroute 実行ボタンも更新（Trace チェック状態が変わっている可能性があるため）
-            if (btnTraceroute != null)
-            {
-                UpdateTracerouteButtons();
-            }
+            UpdateTracerouteButtons();
         }
 
         private void BtnSaveTraceroute_Click(object sender, EventArgs e)
@@ -1716,7 +1859,20 @@ namespace Pings
                 {
                     try
                     {
-                        File.WriteAllText(sfd.FileName, txtTracerouteOutput.Text, System.Text.Encoding.GetEncoding(932));
+                        // 複数列分を1つのテキストにまとめて保存（各ターゲット毎に見出しを付ける）
+                        using (var sw = new StreamWriter(sfd.FileName, false, System.Text.Encoding.GetEncoding(932)))
+                        {
+                            if (tracerouteTextBoxes != null && tracerouteTextBoxes.Count > 0)
+                            {
+                                foreach (var kv in tracerouteTextBoxes)
+                                {
+                                    sw.WriteLine($"--- {kv.Key} ---");
+                                    sw.WriteLine(kv.Value.Text);
+                                    sw.WriteLine();
+                                }
+                            }
+                        }
+
                         MessageBox.Show("Traceroute 出力をファイルに保存しました。", "保存完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     }
                     catch (Exception ex)
@@ -1755,21 +1911,39 @@ namespace Pings
         // 追加: Trace結果クリアの実装
         private void BtnClearTraceroute_Click(object sender, EventArgs e)
         {
-            if (txtTracerouteOutput == null) return;
+            if (tracerouteTextBoxes == null) return;
 
-            // UI スレッド上で安全にクリア
-            if (txtTracerouteOutput.InvokeRequired)
+            // UI スレッド上で安全にクリア（各 TextBox）
+            foreach (var tb in tracerouteTextBoxes.Values)
             {
-                txtTracerouteOutput.Invoke(new Action(() => {
-                    txtTracerouteOutput.Clear();
-                }));
-            }
-            else
-            {
-                txtTracerouteOutput.Clear();
+                if (tb == null) continue;
+                if (tb.InvokeRequired)
+                {
+                    tb.Invoke(new Action(() => tb.Clear()));
+                }
+                else
+                {
+                    tb.Clear();
+                }
             }
 
             // ボタン状態更新
+            UpdateTracerouteButtons();
+        }
+
+        // 追加: Traceroute 停止ボタンの処理（実行中にキャンセル）
+        private void BtnStopTraceroute_Click(object sender, EventArgs e)
+        {
+            if (tracerouteCts != null)
+            {
+                try
+                {
+                    tracerouteCts.Cancel();
+                }
+                catch { }
+            }
+            // すぐに UI を更新
+            _isTracerouteRunning = false;
             UpdateTracerouteButtons();
         }
         // ---------------------------------------------------------------
