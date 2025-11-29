@@ -1040,6 +1040,7 @@ namespace Pings
                 }
             }
         }
+
         private void BtnSaveResult_Click(object sender, EventArgs e)
         {
             if (cts != null)
@@ -1048,35 +1049,32 @@ namespace Pings
                 return;
             }
 
-            // 実行ファイルと同じフォルダへ保存（ダイアログは表示しない）
-            string folder = AppDomain.CurrentDomain.BaseDirectory;
+            string baseFolder = AppDomain.CurrentDomain.BaseDirectory;
+            string folder = Path.Combine(baseFolder, "Ping_Result");
             string filePath = Path.Combine(folder, $"Ping_Result_{DateTime.Now:yyyyMMdd}.csv");
 
             try
             {
-                // 追記モードで保存（再実行時は追記される）
-                // Shift-JIS (Encoding.GetEncoding(932)) でファイルに書き込みます。
+                Directory.CreateDirectory(folder);
+
                 using (StreamWriter sw = new StreamWriter(filePath, true, System.Text.Encoding.GetEncoding(932)))
                 {
-                    // 区切りヘッダ（追記したときに分かりやすくする）
+                    // 区切りヘッダ（追記時の判別用）
                     sw.WriteLine("================================================================");
                     sw.WriteLine($"Saved: {DateTime.Now:yyyy/MM/dd HH:mm:ss}");
                     sw.WriteLine();
 
-                    // --- 1. ヘッダー情報 ---
+                    // ヘッダー情報
                     sw.WriteLine($"開始日時　：　{txtStartTime.Text}");
                     sw.WriteLine($"終了日時　：　{txtEndTime.Text}");
                     sw.WriteLine($"送信間隔　：　{cmbInterval.Text} [ms]     タイムアウト　：　{cmbTimeout.Text} [ms]");
-                    sw.WriteLine(); // 空行
+                    sw.WriteLine();
 
-                    // --- 2. 監視統計データ (dgvMonitorの内容) ---
+                    // 監視統計
                     sw.WriteLine("--- 監視統計 ---");
-
-                    // ヘッダー行
                     string header = "ｽﾃｰﾀｽ,順番,対象アドレス,Host名,送信回数,失敗回数,連続失敗回数,連続失敗時間[hh:mm:ss],最大失敗時間[hh:mm:ss],時間[ms],平均値[ms],最小値[ms],最大値[ms]";
                     sw.WriteLine(header);
 
-                    // データ行
                     foreach (var item in monitorList.OrderBy(i => i.順番))
                     {
                         string line = string.Join(",",
@@ -1090,7 +1088,6 @@ namespace Pings
                             item.連続失敗時間s,
                             item.最大失敗時間s,
                             item.時間ms,
-                            // 平均値はF1形式で出力
                             $"{item.平均値ms:F1}",
                             item.最小値ms,
                             item.最大値ms
@@ -1098,21 +1095,18 @@ namespace Pings
                         sw.WriteLine(line);
                     }
 
-                    sw.WriteLine(); // 空行
-                    sw.WriteLine(); // 空行
+                    sw.WriteLine();
+                    sw.WriteLine();
 
-                    // --- 3. 障害イベントログデータ (dgvLogの内容) ---
+                    // 障害イベントログ
                     sw.WriteLine("--- 障害イベントログ ---");
-
                     if (disruptionLogList.Any())
                     {
-                        // ヘッダー行（失敗回数を追加）
                         string logHeader = "対象アドレス,Host名,Down開始日時,復旧日時,失敗回数,失敗時間[hh:mm:ss]," +
                                            "Down前平均[ms],Down前最小[ms],Down前最大[ms]," +
                                            "復旧後平均[ms],復旧後最小[ms],復旧後最大[ms]";
                         sw.WriteLine(logHeader);
 
-                        // データ行 (常に復旧日時でソートして書き出す)
                         foreach (var logItem in disruptionLogList.OrderBy(i => i.復旧日時))
                         {
                             string logLine = string.Join(",",
@@ -1122,7 +1116,6 @@ namespace Pings
                                 logItem.復旧日時.ToString("yyyy/MM/dd HH:mm:ss"),
                                 logItem.失敗回数,
                                 logItem.失敗時間mmss,
-                                // 平均値はF1形式で出力
                                 $"{logItem.Down前平均ms:F1}",
                                 logItem.Down前最小ms,
                                 logItem.Down前最大ms,
@@ -1137,19 +1130,20 @@ namespace Pings
                     {
                         sw.WriteLine("障害イベントは記録されていません。");
                     }
+
                     sw.WriteLine();
                 }
 
-                MessageBox.Show($"監視結果をファイルに保存しました（追記モード）：\n{filePath}", "保存完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show($"監視結果を Ping_Result フォルダへ保存しました（追記モード）：\n{filePath}", "保存完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
-                // 保存成功後に編集許可を与える（既存の処理に追加）
+                // 保存成功後に編集許可を与える
                 _allowEditAfterStop = true;
                 _allowIntervalTimeoutEdit = true;
                 UpdateUiState("Stopped");
 
                 if (btnPingStart != null)
                 {
-                    btnPingStart.Enabled = true; // 有効化
+                    btnPingStart.Enabled = true;
                 }
             }
             catch (Exception ex)
@@ -1187,17 +1181,18 @@ namespace Pings
         {
             if (tracerouteTextBoxes == null || tracerouteTextBoxes.Count == 0) return;
 
-            string folder = AppDomain.CurrentDomain.BaseDirectory;
+            string baseFolder = AppDomain.CurrentDomain.BaseDirectory;
+            string folder = Path.Combine(baseFolder, "Traceroute_Result");
+
             try
             {
+                Directory.CreateDirectory(folder);
+
                 foreach (var kv in tracerouteTextBoxes)
                 {
                     string address = kv.Key;
-                    string content = kv.Value.Text;
+                    string content = kv.Value?.Text;
                     if (string.IsNullOrEmpty(content)) continue;
-
-                    // Host名を monitorList から取得（同一アドレスが複数ある場合は最初のものを使用）
-
 
                     string hostName = monitorList?
                         .FirstOrDefault(i => string.Equals(i.対象アドレス, address, StringComparison.OrdinalIgnoreCase))
@@ -1207,6 +1202,7 @@ namespace Pings
                     string safeHost = SanitizeFileName(hostName);
                     string fileName = Path.Combine(folder, $"Traceroute_result_{DateTime.Now:yyyyMMdd}_{safeAddress}_{safeHost}.log");
 
+                    // 追記モードで保存
                     using (var sw = new StreamWriter(fileName, true, System.Text.Encoding.GetEncoding(932)))
                     {
                         sw.WriteLine("----------------------------------------------------------------");
@@ -1218,12 +1214,8 @@ namespace Pings
             }
             catch (Exception ex)
             {
-                // 自動保存の失敗はユーザーに通知する（必要ならログに落とす）
-                try
-                {
-                    MessageBox.Show($"Traceroute 自動保存中にエラーが発生しました:\n{ex.Message}", "保存エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }
-                catch { /* UIが無い場面では無視 */ }
+                try { MessageBox.Show($"Traceroute 自動保存中にエラーが発生しました:\n{ex.Message}", "保存エラー", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+                catch { /* UI unavailable の場合は無視 */ }
             }
         }
 
@@ -1769,7 +1761,8 @@ namespace Pings
                 }
 
                 // バインディング更新
-                try {
+                try
+                {
                     monitorList.ResetBindings();
                 }
                 catch
@@ -2184,30 +2177,27 @@ namespace Pings
                 return;
             }
 
-            // 実行ファイルと同じフォルダへ保存する仕様（要件1）
-            string folder = AppDomain.CurrentDomain.BaseDirectory;
+            string baseFolder = AppDomain.CurrentDomain.BaseDirectory;
+            string folder = Path.Combine(baseFolder, "Traceroute_Result");
+
             try
             {
-                // 各対象アドレスごとにファイルを作成（追記モード）。ファイル名に使えない文字は置換。
+                Directory.CreateDirectory(folder);
+
                 foreach (var kv in tracerouteTextBoxes)
                 {
                     string address = kv.Key;
-                    string content = kv.Value.Text;
+                    string content = kv.Value?.Text;
                     if (string.IsNullOrEmpty(content)) continue;
-
-                    // Host名を monitorList から取得（同一アドレスが複数ある場合は最初のものを使用）
-
 
                     string hostName = monitorList?
                         .FirstOrDefault(i => string.Equals(i.対象アドレス, address, StringComparison.OrdinalIgnoreCase))
                         ?.Host名 ?? "";
 
-                    // ファイル名: Traceroute_result_yyyymmdd_対象アドレス_ホスト名.log (拡張子を .log に統一)
                     string safeAddress = SanitizeFileName(address);
                     string safeHost = SanitizeFileName(hostName);
                     string fileName = Path.Combine(folder, $"Traceroute_result_{DateTime.Now:yyyyMMdd}_{safeAddress}_{safeHost}.log");
 
-                    // 追記で保存（既存があれば追記）
                     using (var sw = new StreamWriter(fileName, true, System.Text.Encoding.GetEncoding(932)))
                     {
                         sw.WriteLine("----------------------------------------------------------------");
@@ -2216,7 +2206,7 @@ namespace Pings
                         sw.WriteLine();
                     }
 
-                    // 保存後は画面上の該当TextBoxをクリア（要件3）
+                    // 保存後は画面上の該当TextBoxをクリア（既存の仕様）
                     if (kv.Value.InvokeRequired)
                     {
                         kv.Value.Invoke(new Action(() => kv.Value.Clear()));
@@ -2227,14 +2217,13 @@ namespace Pings
                     }
                 }
 
-                MessageBox.Show("Traceroute 出力を実行ファイルと同じフォルダへ保存しました（対象ごとに追記保存）。", "保存完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show("Traceroute 出力を Traceroute_Result フォルダへ保存しました（対象ごとに追記保存）。", "保存完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
                 MessageBox.Show($"ファイルの保存中にエラーが発生しました:\n{ex.Message}", "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
 
-            // 保存後はボタン状態を更新（表示をクリアしているため Save は無効化される）
             UpdateTracerouteButtons();
         }
 
