@@ -174,8 +174,8 @@ namespace Pings
         private int _currentDisruptionFailureCount = 0;
 
         // UIからの入力値
-        public int 送信間隔ms { get; set; } = 500;
-        public int タイムアウトms { get; set; } = 1000;
+        public int 送信間隔ms { get; set; } = 1000;
+        public int タイムアウトms { get; set; } = 2000;
 
         // 追加: Traceroute 対象フラグ
         public bool Trace { get; set; } = false;
@@ -1435,12 +1435,12 @@ namespace Pings
             Label lblInterval = new Label { Text = "送信間隔 [ms]", Location = new Point(350, 5), AutoSize = true };
             cmbInterval = new ComboBox { Location = new Point(350, 23), Width = 60, DropDownStyle = ComboBoxStyle.DropDownList };
             cmbInterval.Items.AddRange(new object[] { "100", "500", "1000", "2000" });
-            cmbInterval.SelectedIndex = 1;
+            cmbInterval.SelectedIndex = 2;
 
             Label lblTimeout = new Label { Text = "タイムアウト [ms]", Location = new Point(480, 5), AutoSize = true };
             cmbTimeout = new ComboBox { Location = new Point(480, 23), Width = 60, DropDownStyle = ComboBoxStyle.DropDownList };
             cmbTimeout.Items.AddRange(new object[] { "500", "1000", "2000", "5000" });
-            cmbTimeout.SelectedIndex = 1;
+            cmbTimeout.SelectedIndex = 2;
 
             topPanel.Controls.Add(lblInterval);
             topPanel.Controls.Add(cmbInterval);
