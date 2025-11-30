@@ -1753,7 +1753,7 @@ namespace Pings
 
         private void InitializeCustomComponents()
         {
-            this.Text = "Pings B版";
+            this.Text = "Pings";
             this.Size = new Size(1300, 700);
             this.StartPosition = FormStartPosition.CenterScreen;
 
