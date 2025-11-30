@@ -1575,13 +1575,12 @@ namespace Pings
             topPanel.Controls.Add(lblTimeout);
             topPanel.Controls.Add(cmbTimeout);
 
-            // 置換: InitializeCustomComponents 内のインターフェイス選択部（lblInterface / cmbInterface / btnRefreshInterfaces と PopulateNetworkInterfaces 呼び出し）を以下に差し替えてください。
-
+            /* 追加するコード例（そのままコピーして InitializeCustomComponents 内に貼ってください） */
             Label lblInterface = new Label { Text = "送信インターフェイス", Location = new Point(600, 5), AutoSize = true };
             cmbInterface = new ComboBox { Location = new Point(600, 23), Width = 240, DropDownStyle = ComboBoxStyle.DropDownList };
             btnRefreshInterfaces = new Button { Text = "更新", Location = new Point(848, 22), Width = 50 };
 
-            // イベント登録（内部で残しておくが、UI上は非表示にする）
+            // イベント登録
             cmbInterface.SelectedIndexChanged += CmbInterface_SelectedIndexChanged;
             btnRefreshInterfaces.Click += BtnRefreshInterfaces_Click;
 
@@ -1590,17 +1589,8 @@ namespace Pings
             topPanel.Controls.Add(cmbInterface);
             topPanel.Controls.Add(btnRefreshInterfaces);
 
-            // 非表示にする（要求: コンボボックスを隠す）
-            lblInterface.Visible = false;
-            cmbInterface.Visible = false;
-            btnRefreshInterfaces.Visible = false;
-
-            // また念のため無効化してフォーカス対象外にする
-            cmbInterface.Enabled = false;
-            btnRefreshInterfaces.Enabled = false;
-
-            // 初期一覧読み込みは行わず、必要な場合に手動で PopulateNetworkInterfaces を呼ぶようにする。
-            //PopulateNetworkInterfaces();
+            // 初期一覧読み込み
+            PopulateNetworkInterfaces();
 
             // content panel
             Panel contentPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0) };
