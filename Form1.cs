@@ -430,6 +430,204 @@ namespace Pings
 
             public override string ToString() => Display;
         }
+
+
+        // クラス内の private フィールド群に追加してください:
+        private bool _autoSaveFailed = false;
+        private string _lastAutoSaveError = null;
+
+        // 共通保存ロジック（既定のフォルダへ保存を試みる。失敗時はエラーメッセージを返す）
+        private bool TrySavePingResultsToDefault(out string errorMessage)
+        {
+            errorMessage = null;
+            try
+            {
+                string baseFolder = AppDomain.CurrentDomain.BaseDirectory;
+                string folder = Path.Combine(baseFolder, "Ping_Result");
+                string filePath = Path.Combine(folder, $"Ping_Result_{DateTime.Now:yyyyMMdd}.csv");
+
+                Directory.CreateDirectory(folder);
+
+                using (StreamWriter sw = new StreamWriter(filePath, true, System.Text.Encoding.GetEncoding(932)))
+                {
+                    // 区切りヘッダ（追記時の判別用）
+                    sw.WriteLine("================================================================");
+                    sw.WriteLine($"Saved: {DateTime.Now:yyyy/MM/dd HH:mm:ss}");
+                    sw.WriteLine();
+
+                    // ヘッダー情報
+                    sw.WriteLine($"開始日時　：　{txtStartTime.Text}");
+                    sw.WriteLine($"終了日時　：　{txtEndTime.Text}");
+                    sw.WriteLine($"送信間隔　：　{cmbInterval.Text} [ms]     タイムアウト　：　{cmbTimeout.Text} [ms]");
+                    sw.WriteLine();
+
+                    // 監視統計
+                    sw.WriteLine("--- 監視統計 ---");
+                    string header = "ｽﾃｰﾀｽ,順番,対象アドレス,Host名,送信回数,失敗回数,連続失敗回数,連続失敗時間[hh:mm:ss],最大失敗時間[hh:mm:ss],時間[ms],平均値[ms],最小値[ms],最大値[ms]";
+                    sw.WriteLine(header);
+
+                    foreach (var item in monitorList.OrderBy(i => i.順番))
+                    {
+                        string line = string.Join(",",
+                            item.ステータス,
+                            item.順番,
+                            item.対象アドレス,
+                            item.Host名,
+                            item.送信回数,
+                            item.失敗回数,
+                            item.連続失敗回数,
+                            item.連続失敗時間s,
+                            item.最大失敗時間s,
+                            item.時間ms,
+                            $"{item.平均値ms:F1}",
+                            item.最小値ms,
+                            item.最大値ms
+                        );
+                        sw.WriteLine(line);
+                    }
+
+                    sw.WriteLine();
+                    sw.WriteLine();
+
+                    // 障害イベントログ
+                    sw.WriteLine("--- 障害イベントログ ---");
+                    if (disruptionLogList.Any())
+                    {
+                        string logHeader = "対象アドレス,Host名,Down開始日時,復旧日時,失敗回数,失敗時間[hh:mm:ss]," +
+                                           "Down前平均[ms],Down前最小[ms],Down前最大[ms]," +
+                                           "復旧後平均[ms],復旧後最小[ms],復旧後最大[ms]";
+                        sw.WriteLine(logHeader);
+
+                        foreach (var logItem in disruptionLogList.OrderBy(i => i.復旧日時))
+                        {
+                            string logLine = string.Join(",",
+                                logItem.対象アドレス,
+                                logItem.Host名,
+                                logItem.Down開始日時.ToString("yyyy/MM/dd HH:mm:ss"),
+                                logItem.復旧日時.ToString("yyyy/MM/dd HH:mm:ss"),
+                                logItem.失敗回数,
+                                logItem.失敗時間mmss,
+                                $"{logItem.Down前平均ms:F1}",
+                                logItem.Down前最小ms,
+                                logItem.Down前最大ms,
+                                $"{logItem.復旧後平均ms:F1}",
+                                logItem.復旧後最小ms,
+                                logItem.復旧後最大ms
+                            );
+                            sw.WriteLine(logLine);
+                        }
+                    }
+                    else
+                    {
+                        sw.WriteLine("障害イベントは記録されていません。");
+                    }
+
+                    sw.WriteLine();
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                errorMessage = ex.Message;
+                return false;
+            }
+        }
+
+        // 汎用保存（任意のファイルパスへ保存）
+        // path がある場合はその場所へ、なければ既定パスへ
+        private bool SavePingResultsToPath(string path, out string errorMessage)
+        {
+            errorMessage = null;
+            try
+            {
+                var dir = Path.GetDirectoryName(path);
+                if (!string.IsNullOrEmpty(dir))
+                    Directory.CreateDirectory(dir);
+
+                using (StreamWriter sw = new StreamWriter(path, true, System.Text.Encoding.GetEncoding(932)))
+                {
+                    // 出力内容は TrySavePingResultsToDefault と同一
+                    sw.WriteLine("================================================================");
+                    sw.WriteLine($"Saved: {DateTime.Now:yyyy/MM/dd HH:mm:ss}");
+                    sw.WriteLine();
+
+                    sw.WriteLine($"開始日時　：　{txtStartTime.Text}");
+                    sw.WriteLine($"終了日時　：　{txtEndTime.Text}");
+                    sw.WriteLine($"送信間隔　：　{cmbInterval.Text} [ms]     タイムアウト　：　{cmbTimeout.Text} [ms]");
+                    sw.WriteLine();
+
+                    sw.WriteLine("--- 監視統計 ---");
+                    string header = "ｽﾃｰﾀｽ,順番,対象アドレス,Host名,送信回数,失敗回数,連続失敗回数,連続失敗時間[hh:mm:ss],最大失敗時間[hh:mm:ss],時間[ms],平均値[ms],最小値[ms],最大値[ms]";
+                    sw.WriteLine(header);
+
+                    foreach (var item in monitorList.OrderBy(i => i.順番))
+                    {
+                        string line = string.Join(",",
+                            item.ステータス,
+                            item.順番,
+                            item.対象アドレス,
+                            item.Host名,
+                            item.送信回数,
+                            item.失敗回数,
+                            item.連続失敗回数,
+                            item.連続失敗時間s,
+                            item.最大失敗時間s,
+                            item.時間ms,
+                            $"{item.平均値ms:F1}",
+                            item.最小値ms,
+                            item.最大値ms
+                        );
+                        sw.WriteLine(line);
+                    }
+
+                    sw.WriteLine();
+                    sw.WriteLine();
+
+                    sw.WriteLine("--- 障害イベントログ ---");
+                    if (disruptionLogList.Any())
+                    {
+                        string logHeader = "対象アドレス,Host名,Down開始日時,復旧日時,失敗回数,失敗時間[hh:mm:ss]," +
+                                           "Down前平均[ms],Down前最小[ms],Down前最大[ms]," +
+                                           "復旧後平均[ms],復旧後最小[ms],復旧後最大[ms]";
+                        sw.WriteLine(logHeader);
+
+                        foreach (var logItem in disruptionLogList.OrderBy(i => i.復旧日時))
+                        {
+                            string logLine = string.Join(",",
+                                logItem.対象アドレス,
+                                logItem.Host名,
+                                logItem.Down開始日時.ToString("yyyy/MM/dd HH:mm:ss"),
+                                logItem.復旧日時.ToString("yyyy/MM/dd HH:mm:ss"),
+                                logItem.失敗回数,
+                                logItem.失敗時間mmss,
+                                $"{logItem.Down前平均ms:F1}",
+                                logItem.Down前最小ms,
+                                logItem.Down前最大ms,
+                                $"{logItem.復旧後平均ms:F1}",
+                                logItem.復旧後最小ms,
+                                logItem.復旧後最大ms
+                            );
+                            sw.WriteLine(logLine);
+                        }
+                    }
+                    else
+                    {
+                        sw.WriteLine("障害イベントは記録されていません。");
+                    }
+
+                    sw.WriteLine();
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                errorMessage = ex.Message;
+                return false;
+            }
+        }
+
         /// <summary>
         /// ネットワークインターフェイスとアドレスを列挙して ComboBox を更新します
         /// </summary>
@@ -676,8 +874,9 @@ namespace Pings
                     btnPingStart.Enabled = true;
                     btnStop.Enabled = false;
                     btnClear.Enabled = true;
-                    // 自動保存が有効な場合は手動保存ボタンを無効にする
-                    btnSave.Enabled = !autoSavePing;
+                    // 自動保存が有効な場合は通常は手動保存ボタンを無効にするが、
+                    // 自動保存が失敗している場合は手動で保存できるように有効にする
+                    btnSave.Enabled = !autoSavePing || _autoSaveFailed;
                     break;
             }
 
@@ -688,7 +887,6 @@ namespace Pings
                 if (btnStop != null) btnStop.Enabled = false;
             }
         }
-
         // 変更済: Traceroute ボタン状態更新メソッド
         // UpdateTracerouteButtons を修正：自動保存オン時に手動保存ボタンを無効にする
         private void UpdateTracerouteButtons()
@@ -1150,6 +1348,8 @@ namespace Pings
             }
         }
 
+
+        // BtnSaveResult_Click を修正 — 自動保存失敗時は SaveFileDialog で手動保存を行えるようにする
         private void BtnSaveResult_Click(object sender, EventArgs e)
         {
             if (cts != null)
@@ -1158,91 +1358,15 @@ namespace Pings
                 return;
             }
 
-            string baseFolder = AppDomain.CurrentDomain.BaseDirectory;
-            string folder = Path.Combine(baseFolder, "Ping_Result");
-            string filePath = Path.Combine(folder, $"Ping_Result_{DateTime.Now:yyyyMMdd}.csv");
-
-            try
+            // まず既定パスへ保存を試みる（これが成功すれば通常の保存と同じ）
+            string err;
+            bool okDefault = TrySavePingResultsToDefault(out err);
+            if (okDefault)
             {
-                Directory.CreateDirectory(folder);
+                _autoSaveFailed = false;
+                _lastAutoSaveError = null;
 
-                using (StreamWriter sw = new StreamWriter(filePath, true, System.Text.Encoding.GetEncoding(932)))
-                {
-                    // 区切りヘッダ（追記時の判別用）
-                    sw.WriteLine("================================================================");
-                    sw.WriteLine($"Saved: {DateTime.Now:yyyy/MM/dd HH:mm:ss}");
-                    sw.WriteLine();
-
-                    // ヘッダー情報
-                    sw.WriteLine($"開始日時　：　{txtStartTime.Text}");
-                    sw.WriteLine($"終了日時　：　{txtEndTime.Text}");
-                    sw.WriteLine($"送信間隔　：　{cmbInterval.Text} [ms]     タイムアウト　：　{cmbTimeout.Text} [ms]");
-                    sw.WriteLine();
-
-                    // 監視統計
-                    sw.WriteLine("--- 監視統計 ---");
-                    string header = "ｽﾃｰﾀｽ,順番,対象アドレス,Host名,送信回数,失敗回数,連続失敗回数,連続失敗時間[hh:mm:ss],最大失敗時間[hh:mm:ss],時間[ms],平均値[ms],最小値[ms],最大値[ms]";
-                    sw.WriteLine(header);
-
-                    foreach (var item in monitorList.OrderBy(i => i.順番))
-                    {
-                        string line = string.Join(",",
-                            item.ステータス,
-                            item.順番,
-                            item.対象アドレス,
-                            item.Host名,
-                            item.送信回数,
-                            item.失敗回数,
-                            item.連続失敗回数,
-                            item.連続失敗時間s,
-                            item.最大失敗時間s,
-                            item.時間ms,
-                            $"{item.平均値ms:F1}",
-                            item.最小値ms,
-                            item.最大値ms
-                        );
-                        sw.WriteLine(line);
-                    }
-
-                    sw.WriteLine();
-                    sw.WriteLine();
-
-                    // 障害イベントログ
-                    sw.WriteLine("--- 障害イベントログ ---");
-                    if (disruptionLogList.Any())
-                    {
-                        string logHeader = "対象アドレス,Host名,Down開始日時,復旧日時,失敗回数,失敗時間[hh:mm:ss]," +
-                                           "Down前平均[ms],Down前最小[ms],Down前最大[ms]," +
-                                           "復旧後平均[ms],復旧後最小[ms],復旧後最大[ms]";
-                        sw.WriteLine(logHeader);
-
-                        foreach (var logItem in disruptionLogList.OrderBy(i => i.復旧日時))
-                        {
-                            string logLine = string.Join(",",
-                                logItem.対象アドレス,
-                                logItem.Host名,
-                                logItem.Down開始日時.ToString("yyyy/MM/dd HH:mm:ss"),
-                                logItem.復旧日時.ToString("yyyy/MM/dd HH:mm:ss"),
-                                logItem.失敗回数,
-                                logItem.失敗時間mmss,
-                                $"{logItem.Down前平均ms:F1}",
-                                logItem.Down前最小ms,
-                                logItem.Down前最大ms,
-                                $"{logItem.復旧後平均ms:F1}",
-                                logItem.復旧後最小ms,
-                                logItem.復旧後最大ms
-                            );
-                            sw.WriteLine(logLine);
-                        }
-                    }
-                    else
-                    {
-                        sw.WriteLine("障害イベントは記録されていません。");
-                    }
-
-                    sw.WriteLine();
-                }
-
+                string filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Ping_Result", $"Ping_Result_{DateTime.Now:yyyyMMdd}.csv");
                 MessageBox.Show($"監視結果を Ping_Result フォルダへ保存しました（追記モード）：\n{filePath}", "保存完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
                 // 保存成功後に編集許可を与える
@@ -1254,6 +1378,70 @@ namespace Pings
                 {
                     btnPingStart.Enabled = true;
                 }
+
+                return;
+            }
+
+            // 既定の保存先に書けなかった場合は手動で保存先を選ばせる（SaveFileDialog）
+            try
+            {
+                using (SaveFileDialog sfd = new SaveFileDialog())
+                {
+                    sfd.Filter = "CSVファイル (*.csv)|*.csv|テキストファイル (*.txt)|*.txt|すべてのファイル (*.*)|*.*";
+                    sfd.Title = "監視結果を保存（手動）";
+                    // 既定ファイル名を提示（既定パスが使えない場合でも候補名は提示）
+                    sfd.FileName = $"Ping_Result_{DateTime.Now:yyyyMMdd}.csv";
+                    string baseFolder = AppDomain.CurrentDomain.BaseDirectory;
+                    string defaultFolder = Path.Combine(baseFolder, "Ping_Result");
+                    try
+                    {
+                        if (Directory.Exists(defaultFolder))
+                            sfd.InitialDirectory = defaultFolder;
+                    }
+                    catch { /* ignore */ }
+
+                    if (sfd.ShowDialog() == DialogResult.OK)
+                    {
+                        string savePath = sfd.FileName;
+                        string saveErr;
+                        bool saved = SavePingResultsToPath(savePath, out saveErr);
+                        if (saved)
+                        {
+                            _autoSaveFailed = false;
+                            _lastAutoSaveError = null;
+                            MessageBox.Show($"監視結果を保存しました：\n{savePath}", "保存完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+                            // 保存成功後に編集許可を与える
+                            _allowEditAfterStop = true;
+                            _allowIntervalTimeoutEdit = true;
+                            UpdateUiState("Stopped");
+
+                            if (btnPingStart != null)
+                            {
+                                btnPingStart.Enabled = true;
+                            }
+                        }
+                        else
+                        {
+                            // 手動保存でも失敗した場合はエラー表示
+                            MessageBox.Show($"手動保存に失敗しました:\n{saveErr}", "保存エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        }
+                    }
+                    else
+                    {
+                        // ユーザーが保存先選択をキャンセルした場合は、保存できなかった旨を表示し、
+                        // 自動保存が失敗している状態ならば手動保存ボタンは有効のままにする
+                        if (!_autoSaveFailed)
+                        {
+                            // 既定保存に失敗していなければ通常のキャンセル挙動
+                            MessageBox.Show("保存をキャンセルしました。", "キャンセル", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        }
+                        else
+                        {
+                            MessageBox.Show("自動保存に失敗しています。必要なら[Ping結果保存]で再度保存してください。", "自動保存失敗", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        }
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -1261,6 +1449,14 @@ namespace Pings
             }
         }
 
+        // UpdateUiState の Stopped 分岐を以下のように修正してください（既存箇所の置換）:
+        // case "Stopped":
+        //     btnPingStart.Enabled = true;
+        //     btnStop.Enabled = false;
+        //     btnClear.Enabled = true;
+        //     // 自動保存が有効な場合は手動保存ボタンを無効にする。ただし自動保存が失敗した場合は有効にする
+        //     btnSave.Enabled = !autoSavePing || _autoSaveFailed;
+        //     break;
         // monitorList の変更（追加・削除・リセット）を受けて順番を再計算する
         private void MonitorList_ListChanged(object sender, ListChangedEventArgs e)
         {
@@ -1443,6 +1639,8 @@ namespace Pings
             }
         }
 
+
+        // StopMonitoring の自動保存処理を上書き（既存呼び出し箇所と置換）
         private void StopMonitoring()
         {
             if (cts != null)
@@ -1456,18 +1654,32 @@ namespace Pings
                 // 停止直後は対象アドレス/Host名の編集を禁止する
                 _allowEditAfterStop = false;
 
-                // 変更: 自動保存フラグがオンのときは All_Ping_Result に保存するのではなく
-                // 「Ping結果保存」ボタンを押したときと同じ動作を自動実行する。
+                // 自動保存フラグがオンのときは既定パスに自動保存を試みる
                 if (mnuAutoSaveAllPing != null && mnuAutoSaveAllPing.Checked)
                 {
-                    try
+                    string err;
+                    bool ok = TrySavePingResultsToDefault(out err);
+                    if (!ok)
                     {
-                        // BtnSaveResult_Click は UI ハンドラなので、直接呼び出して保存処理を実行する
-                        BtnSaveResult_Click(this, EventArgs.Empty);
+                        // 自動保存に失敗した場合は手動保存を許可する
+                        _autoSaveFailed = true;
+                        _lastAutoSaveError = err;
+                        try
+                        {
+                            MessageBox.Show($"自動保存に失敗しました:\n{err}\n\n「Ping結果保存」ボタンで手動保存してください。", "自動保存失敗", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        }
+                        catch { }
                     }
-                    catch
+                    else
                     {
-                        // 自動保存失敗はここで例外を投げず無視（必要ならログ表示を追加）
+                        _autoSaveFailed = false;
+                        _lastAutoSaveError = null;
+                        try
+                        {
+                            string filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Ping_Result", $"Ping_Result_{DateTime.Now:yyyyMMdd}.csv");
+                            MessageBox.Show($"監視結果を自動保存しました（追記モード）：\n{filePath}", "自動保存完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        }
+                        catch { }
                     }
                 }
 
@@ -1575,12 +1787,13 @@ namespace Pings
             topPanel.Controls.Add(lblTimeout);
             topPanel.Controls.Add(cmbTimeout);
 
-            /* 追加するコード例（そのままコピーして InitializeCustomComponents 内に貼ってください） */
+            // 置換: InitializeCustomComponents 内のインターフェイス選択部（lblInterface / cmbInterface / btnRefreshInterfaces と PopulateNetworkInterfaces 呼び出し）を以下に差し替えてください。
+
             Label lblInterface = new Label { Text = "送信インターフェイス", Location = new Point(600, 5), AutoSize = true };
             cmbInterface = new ComboBox { Location = new Point(600, 23), Width = 240, DropDownStyle = ComboBoxStyle.DropDownList };
             btnRefreshInterfaces = new Button { Text = "更新", Location = new Point(848, 22), Width = 50 };
 
-            // イベント登録
+            // イベント登録（内部で残しておくが、UI上は非表示にする）
             cmbInterface.SelectedIndexChanged += CmbInterface_SelectedIndexChanged;
             btnRefreshInterfaces.Click += BtnRefreshInterfaces_Click;
 
@@ -1589,8 +1802,17 @@ namespace Pings
             topPanel.Controls.Add(cmbInterface);
             topPanel.Controls.Add(btnRefreshInterfaces);
 
-            // 初期一覧読み込み
-            PopulateNetworkInterfaces();
+            // 非表示にする（要求: コンボボックスを隠す）
+            lblInterface.Visible = false;
+            cmbInterface.Visible = false;
+            btnRefreshInterfaces.Visible = false;
+
+            // また念のため無効化してフォーカス対象外にする
+            cmbInterface.Enabled = false;
+            btnRefreshInterfaces.Enabled = false;
+
+            // 初期一覧読み込みは行わず、必要な場合に手動で PopulateNetworkInterfaces を呼ぶようにする。
+            //PopulateNetworkInterfaces();
 
             // content panel
             Panel contentPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0) };
