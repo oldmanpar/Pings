@@ -18,7 +18,7 @@ namespace Pings
             InitializeComponent();
 
             // 表示文字列（元の labelInfo と同じ内容にする）
-            var text = "Pings Ver1.11\noldmanpar\n";
+            var text = "Pings Ver2.00\noldmanpar\n";
             var author = "oldmanpar";
             var authorUrl = "https://github.com/oldmanpar/Pings/releases";
 
