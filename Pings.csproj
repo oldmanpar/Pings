@@ -73,6 +73,12 @@
     <Compile Include="Form1.Designer.cs">
       <DependentUpon>Form1.cs</DependentUpon>
     </Compile>
+    <Compile Include="PingTerminalForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="PingTerminalForm.Designer.cs">
+      <DependentUpon>PingTerminalForm.cs</DependentUpon>
+    </Compile>
     <Compile Include="models\DisruptionLogItem.cs" />
     <Compile Include="models\PingMonitorItem.cs" />
     <Compile Include="Program.cs" />
@@ -81,6 +87,9 @@
     <Compile Include="services\PingService.cs" />
     <Compile Include="services\TracerouteService.cs" />
     <Compile Include="utils\SortableBindingList.cs" />
+    <EmbeddedResource Include="PingTerminalForm.resx">
+      <DependentUpon>PingTerminalForm.cs</DependentUpon>
+    </EmbeddedResource>
     <EmbeddedResource Include="Properties\Resources.resx">
       <Generator>ResXFileCodeGenerator</Generator>
       <LastGenOutput>Resources.Designer.cs</LastGenOutput>

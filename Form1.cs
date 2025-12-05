@@ -694,6 +694,24 @@ namespace Pings
                 UpdateTracerouteButtons();
             }
         }
+        // ★★★【追加】ダブルクリック時の処理 ★★★
+        private void DgvMonitor_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
+        {
+            // ヘッダーや無効な行のクリックは無視
+            if (e.RowIndex < 0) return;
+
+            // データバインドされているアイテムを取得 (安全なキャスト)
+            if (dgvMonitor.Rows[e.RowIndex].DataBoundItem is PingMonitorItem item)
+            {
+                // アドレスが空の場合は何もしない
+                if (string.IsNullOrWhiteSpace(item.対象アドレス)) return;
+
+                // 新しいPingウィンドウを作成して表示
+                // Ownerをthisにすると、メイン画面の前面に表示されやすくなります
+                var terminal = new PingTerminalForm(item.対象アドレス, item.Host名);
+                terminal.Show(this);
+            }
+        }
         private void dgvLog_ColumnHeaderMouseClick(object sender, DataGridViewCellMouseEventArgs e)
         {
             var col = dgvLog.Columns[e.ColumnIndex];
@@ -838,6 +856,11 @@ namespace Pings
             // 変更: 行の高さをユーザーが変更できないようにする
             dgvMonitor.AllowUserToResizeRows = false;
             dgvMonitor.RowHeadersWidthSizeMode = DataGridViewRowHeadersWidthSizeMode.DisableResizing;
+
+            // ★★★【追加】ここから ★★★
+            // ダブルクリックイベントを登録
+            dgvMonitor.CellDoubleClick += DgvMonitor_CellDoubleClick;
+            // ★★★【追加】ここまで ★★★
 
             statsPage.Controls.Add(dgvMonitor);
             // DataGridView のチェック変更で Traceroute ボタンを即時更新するためのイベント登録
