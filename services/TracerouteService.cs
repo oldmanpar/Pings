@@ -11,13 +11,29 @@ namespace Pings.Services
     /// </summary>
     public class TracerouteService
     {
-        public async Task RunTracerouteAsync(string address, int timeoutMs, CancellationToken token, Action<string> onOutput)
+        /// <summary>
+        /// Tracerouteを実行します
+        /// </summary>
+        /// <param name="address">対象アドレス</param>
+        /// <param name="timeoutMs">タイムアウト(ms)</param>
+        /// <param name="noResolve">trueの場合、名前解決を行わない(-dオプション)</param>
+        /// <param name="token">キャンセルトークン</param>
+        /// <param name="onOutput">出力受取アクション</param>
+        public async Task RunTracerouteAsync(string address, int timeoutMs, bool noResolve, CancellationToken token, Action<string> onOutput)
         {
             // Windows tracert の引数: -d (名前解決なし), -w (タイムアウトms)
             int tryTimeoutMs = Math.Max(100, timeoutMs);
-            string arguments = $"-d -w {tryTimeoutMs} {address}";
 
-            onOutput($"--- tracert {address} (timeout={tryTimeoutMs}ms) ---\r\n");
+            // noResolve が true なら -d を付ける、false なら付けない
+            string resolveOption = noResolve ? "-d" : "";
+
+            // 引数を構築
+            string arguments = $"{resolveOption} -w {tryTimeoutMs} {address}";
+
+            // トリムして余分な空白を除去（オプションがない場合のため）
+            arguments = arguments.Trim();
+
+            onOutput($"--- tracert {address} (timeout={tryTimeoutMs}ms, no-resolve={noResolve}) ---\r\n");
 
             var psi = new ProcessStartInfo
             {
