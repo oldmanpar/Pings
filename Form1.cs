@@ -1074,14 +1074,36 @@ namespace Pings
 
             dgvMonitor.CellFormatting += (s, e) =>
             {
+                if (e.RowIndex < 0) return;
                 if (e.ColumnIndex == 0 && dgvMonitor.Rows[e.RowIndex].DataBoundItem is PingMonitorItem item)
                 {
-                    if (item.ステータス == "Down") { e.CellStyle.BackColor = Color.MistyRose; e.CellStyle.SelectionBackColor = Color.Red; }
-                    else if (item.ステータス == "OK") { e.CellStyle.BackColor = Color.LightGreen; e.CellStyle.SelectionBackColor = Color.Green; }
-                    else if (item.ステータス == "復旧") { e.CellStyle.BackColor = Color.LightSkyBlue; e.CellStyle.SelectionBackColor = Color.Blue; }
+                    var status = item.ステータス ?? "";
+                    // Down や 復旧 はプレフィックスで判定し色付け、OK は緑、その他はデフォルト
+                    if (status.StartsWith("Down", StringComparison.OrdinalIgnoreCase))
+                    {
+                        e.CellStyle.BackColor = Color.MistyRose;
+                        e.CellStyle.SelectionBackColor = Color.Red;
+                    }
+                    else if (status.StartsWith("復旧"))
+                    {
+                        e.CellStyle.BackColor = Color.LightSkyBlue;
+                        e.CellStyle.SelectionBackColor = Color.Blue;
+                    }
+                    else if (status.Equals("OK", StringComparison.OrdinalIgnoreCase))
+                    {
+                        e.CellStyle.BackColor = Color.LightGreen;
+                        e.CellStyle.SelectionBackColor = Color.Green;
+                    }
+                    else
+                    {
+                        // 未設定やその他はデフォルトスタイル
+                        e.CellStyle.BackColor = dgvMonitor.DefaultCellStyle.BackColor;
+                        e.CellStyle.SelectionBackColor = dgvMonitor.DefaultCellStyle.SelectionBackColor;
+                    }
                 }
             };
 
+            // 以下は既存のロググリッド設定...
             disruptionLogList = new SortableBindingList<DisruptionLogItem>(new List<DisruptionLogItem>());
             dgvLog.DataSource = disruptionLogList;
             dgvLog.ColumnHeaderMouseClick += dgvLog_ColumnHeaderMouseClick;
@@ -1101,7 +1123,7 @@ namespace Pings
             // 復旧後（基本統計）
             dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "復旧後平均ms", HeaderText = "復旧後平均", Width = 110, DefaultCellStyle = new DataGridViewCellStyle { Format = "F1" } });
             dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "復旧後最小ms", HeaderText = "復旧後最小", Width = 110 });
-            dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "復旧後最大ms", HeaderText = "復旧後復旧後最大", Width = 110 });
+            dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "復旧後最大ms", HeaderText = "復旧後最大", Width = 110 });
 
             // ★追加: 拡張統計 (Down前)
             dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Down前Jitter1", Name = "colLogJitter1_Pre", HeaderText = "Down前ジッタ①", Width = 100, Visible = false });

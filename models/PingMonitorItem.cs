@@ -70,6 +70,12 @@ namespace Pings.Models
         // 障害中の失敗回数カウンター
         public int CurrentDisruptionFailureCount { get; set; } = 0;
 
+        // ★★★ ユーザー要求による追加: 全体のダウン・復旧の通し番号カウンター ★★★
+        /// <summary>監視開始からのダウン総回数</summary>
+        public long TotalDownCount { get; set; } = 0;
+        /// <summary>監視開始からの復旧総回数</summary>
+        public long TotalRecoveryCount { get; set; } = 0;
+
         // 現在アクティブなログエントリへの参照
         public DisruptionLogItem ActiveLogItem { get; set; } = null;
 
@@ -102,6 +108,10 @@ namespace Pings.Models
             Jitter2_PktPair = 0.0;
             StdDev = 0.0;
 
+            // ★★★ ユーザー要求による追加: カウンターのリセット ★★★
+            TotalDownCount = 0;
+            TotalRecoveryCount = 0;
+
             CurrentSessionUpTimeMs = 0;
             CurrentSessionSuccessCount = 0;
             CurrentSessionMin = 0;
@@ -120,6 +130,7 @@ namespace Pings.Models
             IsCurrentlyDown = false;
             ActiveLogItem = null;
 
+            // 初期値は空文字列にする（最初の成功で "OK" を表示する）
             ステータス = "";
             連続失敗時間s = "";
             最大失敗時間s = "";
