@@ -26,6 +26,11 @@ namespace Pings.Models
         public long 最小値ms { get; set; }
         public long 最大値ms { get; set; }
 
+        // ★追加: 新規統計項目 (UIバインド用)
+        public long Jitter1_MaxMin { get; set; } // 最大値 - 最小値
+        public double Jitter2_PktPair { get; set; } // パケットペア平均
+        public double StdDev { get; set; }       // 標準偏差
+
         // 設定値
         public int 送信間隔ms { get; set; } = 1000;
         public int タイムアウトms { get; set; } = 2000;
@@ -45,11 +50,22 @@ namespace Pings.Models
         public long CurrentSessionMin { get; set; } = 0;
         public long CurrentSessionMax { get; set; } = 0;
 
+        // ★追加: 統計計算用内部変数
+        public double CurrentSessionSumSquares { get; set; } = 0; // 二乗和(標準偏差用)
+        public long PreviousRtt { get; set; } = -1;               // 前回のRTT(Jitter2用)
+        public long JitterDiffSum { get; set; } = 0;              // 差分和(Jitter2用)
+        public int JitterDiffCount { get; set; } = 0;             // 差分回数(Jitter2用)
+
         // Down時の統計スナップショット
         public bool IsCurrentlyDown { get; set; } = false;
         public double SnapAvg { get; set; } = 0.0;
         public long SnapMin { get; set; } = 0;
         public long SnapMax { get; set; } = 0;
+
+        // ★追加: Down時スナップショット用
+        public long SnapJitter1 { get; set; } = 0;
+        public double SnapJitter2 { get; set; } = 0.0;
+        public double SnapStdDev { get; set; } = 0.0;
 
         // 障害中の失敗回数カウンター
         public int CurrentDisruptionFailureCount { get; set; } = 0;
@@ -81,10 +97,21 @@ namespace Pings.Models
             最小値ms = 0;
             最大値ms = 0;
 
+            // ★追加: リセット
+            Jitter1_MaxMin = 0;
+            Jitter2_PktPair = 0.0;
+            StdDev = 0.0;
+
             CurrentSessionUpTimeMs = 0;
             CurrentSessionSuccessCount = 0;
             CurrentSessionMin = 0;
             CurrentSessionMax = 0;
+
+            // ★追加: 内部変数リセット
+            CurrentSessionSumSquares = 0;
+            PreviousRtt = -1;
+            JitterDiffSum = 0;
+            JitterDiffCount = 0;
 
             ContinuousDownStartTime = null;
             MaxDisruptionDuration = TimeSpan.Zero;

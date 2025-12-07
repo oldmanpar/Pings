@@ -22,5 +22,13 @@ namespace Pings.Models
         public double 復旧後平均ms { get; set; }
         public long 復旧後最小ms { get; set; }
         public long 復旧後最大ms { get; set; }
+
+        // ↓↓↓ 以下を追加
+        public long Down前Jitter1 { get; set; }
+        public double Down前Jitter2 { get; set; }
+        public double Down前StdDev { get; set; }
+        public long 復旧後Jitter1 { get; set; }
+        public double 復旧後Jitter2 { get; set; }
+        public double 復旧後StdDev { get; set; }
     }
 }
