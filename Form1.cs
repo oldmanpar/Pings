@@ -46,6 +46,9 @@ namespace Pings
         private Button btnTraceroute, btnSaveTraceroute, btnClearTraceroute, btnStopTraceroute;
         private ToolStripMenuItem mnuAutoSaveAllPing, mnuAutoSaveTraceroute;
 
+        // ★追加: 表示オプションメニュー
+        private ToolStripMenuItem mnuShowJitter1, mnuShowJitter2, mnuShowStdDev;
+
         // インターフェイス選択用 (非表示機能)
         private ComboBox cmbInterface;
         private Button btnRefreshInterfaces;
@@ -83,6 +86,9 @@ namespace Pings
             SetupMenuStrip();              // ← 先にメニューを作る
             InitializeCustomComponents();
             SetupDataGridViewColumns();
+
+            // 初期表示設定の反映
+            UpdateColumnVisibility();
 
             // 依存オブジェクトの生成
             _repository = new PingFileRepository();
@@ -202,6 +208,10 @@ namespace Pings
 
             void ExecuteSave(string path)
             {
+                // 拡張項目を表示するかどうかの設定を渡す必要がある場合はリポジトリを修正するが、
+                // 基本的にCSVには全データ保存するか、UIで見えているものだけ保存するかの方針による。
+                // ここでは「表示設定に関わらず全ての統計値を保存する」または「UIに合わせる」が考えられるが
+                // Repository側で「全データ保存」するように実装を修正済み。
                 _repository.SavePingResults(path, monitorList, disruptionLogList, txtStartTime.Text, txtEndTime.Text, cmbInterval.Text, cmbTimeout.Text);
                 _autoSaveFailed = false;
                 _allowEditAfterStop = true;
@@ -694,20 +704,13 @@ namespace Pings
                 UpdateTracerouteButtons();
             }
         }
-        // ★★★【追加】ダブルクリック時の処理 ★★★
+        // ダブルクリック時の処理
         private void DgvMonitor_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
         {
-            // ヘッダーや無効な行のクリックは無視
             if (e.RowIndex < 0) return;
-
-            // データバインドされているアイテムを取得 (安全なキャスト)
             if (dgvMonitor.Rows[e.RowIndex].DataBoundItem is PingMonitorItem item)
             {
-                // アドレスが空の場合は何もしない
                 if (string.IsNullOrWhiteSpace(item.対象アドレス)) return;
-
-                // 新しいPingウィンドウを作成して表示
-                // Ownerをthisにすると、メイン画面の前面に表示されやすくなります
                 var terminal = new PingTerminalForm(item.対象アドレス, item.Host名);
                 terminal.Show(this);
             }
@@ -816,8 +819,6 @@ namespace Pings
             topPanel.Controls.Add(lblTimeout);
             topPanel.Controls.Add(cmbTimeout);
 
-            // 置換: InitializeCustomComponents 内のインターフェイス選択部（lblInterface / cmbInterface / btnRefreshInterfaces と PopulateNetworkInterfaces 呼び出し）を以下に差し替えてください。
-
             Label lblInterface = new Label { Text = "送信インターフェイス", Location = new Point(600, 5), AutoSize = true };
             cmbInterface = new ComboBox { Location = new Point(600, 23), Width = 240, DropDownStyle = ComboBoxStyle.DropDownList };
             btnRefreshInterfaces = new Button { Text = "更新", Location = new Point(848, 22), Width = 50 };
@@ -835,9 +836,6 @@ namespace Pings
             // また念のため無効化してフォーカス対象外にする
             cmbInterface.Enabled = false;
             btnRefreshInterfaces.Enabled = false;
-
-            // 初期一覧読み込みは行わず、必要な場合に手動で PopulateNetworkInterfaces を呼ぶようにする。
-            //PopulateNetworkInterfaces();
 
             // content panel
             Panel contentPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0) };
@@ -857,10 +855,8 @@ namespace Pings
             dgvMonitor.AllowUserToResizeRows = false;
             dgvMonitor.RowHeadersWidthSizeMode = DataGridViewRowHeadersWidthSizeMode.DisableResizing;
 
-            // ★★★【追加】ここから ★★★
             // ダブルクリックイベントを登録
             dgvMonitor.CellDoubleClick += DgvMonitor_CellDoubleClick;
-            // ★★★【追加】ここまで ★★★
 
             statsPage.Controls.Add(dgvMonitor);
             // DataGridView のチェック変更で Traceroute ボタンを即時更新するためのイベント登録
@@ -1015,9 +1011,26 @@ namespace Pings
             mnuAutoSaveAllPing = new ToolStripMenuItem("Ping結果の自動保存") { CheckOnClick = true, Checked = true };
             mnuAutoSaveAllPing.CheckedChanged += (s, e) => UpdateUiState(cts != null ? "Running" : (string.IsNullOrEmpty(txtStartTime.Text) ? "Initial" : "Stopped"));
             opt.DropDownItems.Add(mnuAutoSaveAllPing);
+
             mnuAutoSaveTraceroute = new ToolStripMenuItem("Trace結果の自動保存") { CheckOnClick = true, Checked = true };
             mnuAutoSaveTraceroute.CheckedChanged += (s, e) => UpdateTracerouteButtons();
             opt.DropDownItems.Add(mnuAutoSaveTraceroute);
+
+            // ★追加: 区切り線と新オプション
+            opt.DropDownItems.Add(new ToolStripSeparator());
+
+            mnuShowJitter1 = new ToolStripMenuItem("ジッタ①（最大値‐最小値）を表示させる") { CheckOnClick = true, Checked = false };
+            mnuShowJitter1.CheckedChanged += (s, e) => UpdateColumnVisibility();
+            opt.DropDownItems.Add(mnuShowJitter1);
+
+            mnuShowJitter2 = new ToolStripMenuItem("ジッタ②（パケットペアの平均値）を表示させる") { CheckOnClick = true, Checked = false };
+            mnuShowJitter2.CheckedChanged += (s, e) => UpdateColumnVisibility();
+            opt.DropDownItems.Add(mnuShowJitter2);
+
+            mnuShowStdDev = new ToolStripMenuItem("Pingの標準偏差を表示する") { CheckOnClick = true, Checked = false };
+            mnuShowStdDev.CheckedChanged += (s, e) => UpdateColumnVisibility();
+            opt.DropDownItems.Add(mnuShowStdDev);
+
             ms.Items.Add(opt);
 
             var help = new ToolStripMenuItem("ヘルプ");
@@ -1026,10 +1039,6 @@ namespace Pings
 
             this.MainMenuStrip = ms;
             this.Controls.Add(ms);
-
-            // 重要: ここで BringToFront / SetChildIndex を行わない。
-            // MenuStrip を後から追加することで、top-docked controls の下に配置され、
-            // 期待するレイアウト（スクリーンショットの OK になる）になる。
         }
 
         private void SetupDataGridViewColumns()
@@ -1049,6 +1058,11 @@ namespace Pings
             dgvMonitor.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "平均値ms", HeaderText = "平均値[ms]", Width = 80, DefaultCellStyle = new DataGridViewCellStyle { Format = "F1" }, ReadOnly = true });
             dgvMonitor.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "最小値ms", HeaderText = "最小値[ms]", Width = 80, ReadOnly = true });
             dgvMonitor.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "最大値ms", HeaderText = "最大値[ms]", Width = 80, ReadOnly = true });
+
+            // ★追加: 拡張統計カラム (Monitor)
+            dgvMonitor.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Jitter1_MaxMin", Name = "colJitter1", HeaderText = "ジッタ①[ms]", Width = 80, ReadOnly = true, Visible = false });
+            dgvMonitor.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Jitter2_PktPair", Name = "colJitter2", HeaderText = "ジッタ②[ms]", Width = 80, DefaultCellStyle = new DataGridViewCellStyle { Format = "F1" }, ReadOnly = true, Visible = false });
+            dgvMonitor.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "StdDev", Name = "colStdDev", HeaderText = "標準偏差", Width = 80, DefaultCellStyle = new DataGridViewCellStyle { Format = "F2" }, ReadOnly = true, Visible = false });
 
             dgvMonitor.CellFormatting += (s, e) =>
             {
@@ -1070,12 +1084,47 @@ namespace Pings
             dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "復旧日時", HeaderText = "復旧日時", Width = 150 });
             dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "失敗回数", HeaderText = "失敗回数", Width = 80 });
             dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "失敗時間mmss", HeaderText = "失敗時間", Width = 100 });
+
+            // Down前
             dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Down前平均ms", HeaderText = "Down前平均", Width = 110, DefaultCellStyle = new DataGridViewCellStyle { Format = "F1" } });
             dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Down前最小ms", HeaderText = "Down前最小", Width = 110 });
             dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Down前最大ms", HeaderText = "Down前最大", Width = 110 });
+            // ★追加: 拡張統計 (Down前)
+            dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Down前Jitter1", Name = "colLogJitter1_Pre", HeaderText = "Down前ジッタ①", Width = 100, Visible = false });
+            dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Down前Jitter2", Name = "colLogJitter2_Pre", HeaderText = "Down前ジッタ②", Width = 100, DefaultCellStyle = new DataGridViewCellStyle { Format = "F1" }, Visible = false });
+            dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Down前StdDev", Name = "colLogStdDev_Pre", HeaderText = "Down前標準偏差", Width = 100, DefaultCellStyle = new DataGridViewCellStyle { Format = "F2" }, Visible = false });
+
+            // 復旧後
             dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "復旧後平均ms", HeaderText = "復旧後平均", Width = 110, DefaultCellStyle = new DataGridViewCellStyle { Format = "F1" } });
             dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "復旧後最小ms", HeaderText = "復旧後最小", Width = 110 });
             dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "復旧後最大ms", HeaderText = "復旧後最大", Width = 110 });
+            // ★追加: 拡張統計 (復旧後)
+            dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "復旧後Jitter1", Name = "colLogJitter1_Post", HeaderText = "復旧後ジッタ①", Width = 100, Visible = false });
+            dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "復旧後Jitter2", Name = "colLogJitter2_Post", HeaderText = "復旧後ジッタ②", Width = 100, DefaultCellStyle = new DataGridViewCellStyle { Format = "F1" }, Visible = false });
+            dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "復旧後StdDev", Name = "colLogStdDev_Post", HeaderText = "復旧後標準偏差", Width = 100, DefaultCellStyle = new DataGridViewCellStyle { Format = "F2" }, Visible = false });
+        }
+
+        // ★追加: カラム表示切り替えメソッド
+        private void UpdateColumnVisibility()
+        {
+            bool showJ1 = mnuShowJitter1.Checked;
+            bool showJ2 = mnuShowJitter2.Checked;
+            bool showSD = mnuShowStdDev.Checked;
+
+            // Monitor Grid
+            if (dgvMonitor.Columns.Contains("colJitter1")) dgvMonitor.Columns["colJitter1"].Visible = showJ1;
+            if (dgvMonitor.Columns.Contains("colJitter2")) dgvMonitor.Columns["colJitter2"].Visible = showJ2;
+            if (dgvMonitor.Columns.Contains("colStdDev")) dgvMonitor.Columns["colStdDev"].Visible = showSD;
+
+            // Log Grid (Down前)
+            if (dgvLog.Columns.Contains("colLogJitter1_Pre")) dgvLog.Columns["colLogJitter1_Pre"].Visible = showJ1;
+            if (dgvLog.Columns.Contains("colLogJitter2_Pre")) dgvLog.Columns["colLogJitter2_Pre"].Visible = showJ2;
+            if (dgvLog.Columns.Contains("colLogStdDev_Pre")) dgvLog.Columns["colLogStdDev_Pre"].Visible = showSD;
+
+            // Log Grid (復旧後)
+            if (dgvLog.Columns.Contains("colLogJitter1_Post")) dgvLog.Columns["colLogJitter1_Post"].Visible = showJ1;
+            if (dgvLog.Columns.Contains("colLogJitter2_Post")) dgvLog.Columns["colLogJitter2_Post"].Visible = showJ2;
+            if (dgvLog.Columns.Contains("colLogStdDev_Post")) dgvLog.Columns["colLogStdDev_Post"].Visible = showSD;
         }
     }
 }
