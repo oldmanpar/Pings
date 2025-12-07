@@ -136,7 +136,6 @@ namespace Pings.Repositories
                 sw.WriteLine();
 
                 sw.WriteLine("--- 監視統計 ---");
-                // ★修正: ヘッダーに新項目を追加
                 string header = "ｽﾃｰﾀｽ,順番,対象アドレス,Host名,送信回数,失敗回数,連続失敗回数,連続失敗時間[hh:mm:ss],最大失敗時間[hh:mm:ss],時間[ms],平均値[ms],最小値[ms],最大値[ms],ジッタ①[ms],ジッタ②[ms],標準偏差";
                 sw.WriteLine(header);
 
@@ -156,7 +155,6 @@ namespace Pings.Repositories
                         $"{item.平均値ms:F1}",
                         item.最小値ms,
                         item.最大値ms,
-                        // ★追加: データ出力
                         item.Jitter1_MaxMin,
                         $"{item.Jitter2_PktPair:F1}",
                         $"{item.StdDev:F2}"
@@ -170,10 +168,12 @@ namespace Pings.Repositories
                 sw.WriteLine("--- 障害イベントログ ---");
                 if (logs.Any())
                 {
-                    // ★修正: ヘッダーに新項目を追加 (Down前/復旧後それぞれ)
+                    // 順序を UI に合わせて変更: Down前基本 → 復旧後基本 → Down前拡張 → 復旧後拡張
                     string logHeader = "対象アドレス,Host名,Down開始日時,復旧日時,失敗回数,失敗時間[hh:mm:ss]," +
-                                       "Down前平均[ms],Down前最小[ms],Down前最大[ms],Down前ジッタ①,Down前ジッタ②,Down前標準偏差," +
-                                       "復旧後平均[ms],復旧後最小[ms],復旧後最大[ms],復旧後ジッタ①,復旧後ジッタ②,復旧後標準偏差";
+                                       "Down前平均[ms],Down前最小[ms],Down前最大[ms]," +
+                                       "復旧後平均[ms],復旧後最小[ms],復旧後最大[ms]," +
+                                       "Down前ジッタ①,Down前ジッタ②,Down前標準偏差," +
+                                       "復旧後ジッタ①,復旧後ジッタ②,復旧後標準偏差";
                     sw.WriteLine(logHeader);
 
                     foreach (var logItem in logs.OrderBy(i => i.復旧日時))
@@ -185,20 +185,19 @@ namespace Pings.Repositories
                             logItem.復旧日時.ToString("yyyy/MM/dd HH:mm:ss"),
                             logItem.失敗回数,
                             logItem.失敗時間mmss,
-                            // Down前
+                            // Down前 基本統計
                             $"{logItem.Down前平均ms:F1}",
                             logItem.Down前最小ms,
                             logItem.Down前最大ms,
-                            // ★追加
-                            logItem.Down前Jitter1,
-                            $"{logItem.Down前Jitter2:F1}",
-                            $"{logItem.Down前StdDev:F2}",
-
-                            // 復旧後
+                            // 復旧後 基本統計
                             $"{logItem.復旧後平均ms:F1}",
                             logItem.復旧後最小ms,
                             logItem.復旧後最大ms,
-                            // ★追加
+                            // Down前 拡張統計
+                            logItem.Down前Jitter1,
+                            $"{logItem.Down前Jitter2:F1}",
+                            $"{logItem.Down前StdDev:F2}",
+                            // 復旧後 拡張統計
                             logItem.復旧後Jitter1,
                             $"{logItem.復旧後Jitter2:F1}",
                             $"{logItem.復旧後StdDev:F2}"

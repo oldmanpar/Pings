@@ -49,6 +49,9 @@ namespace Pings
         // ★追加: 表示オプションメニュー
         private ToolStripMenuItem mnuShowJitter1, mnuShowJitter2, mnuShowStdDev;
 
+        // ★追加: Tracerouteオプションメニュー
+        private ToolStripMenuItem mnuTracerouteNoResolve;
+
         // インターフェイス選択用 (非表示機能)
         private ComboBox cmbInterface;
         private Button btnRefreshInterfaces;
@@ -208,10 +211,6 @@ namespace Pings
 
             void ExecuteSave(string path)
             {
-                // 拡張項目を表示するかどうかの設定を渡す必要がある場合はリポジトリを修正するが、
-                // 基本的にCSVには全データ保存するか、UIで見えているものだけ保存するかの方針による。
-                // ここでは「表示設定に関わらず全ての統計値を保存する」または「UIに合わせる」が考えられるが
-                // Repository側で「全データ保存」するように実装を修正済み。
                 _repository.SavePingResults(path, monitorList, disruptionLogList, txtStartTime.Text, txtEndTime.Text, cmbInterval.Text, cmbTimeout.Text);
                 _autoSaveFailed = false;
                 _allowEditAfterStop = true;
@@ -311,13 +310,17 @@ namespace Pings
                 int timeout = 4000;
                 int.TryParse(cmbTimeout.Text, out timeout);
 
+                // メニューから設定を取得 (名前解決しないか？)
+                bool noResolve = mnuTracerouteNoResolve != null && mnuTracerouteNoResolve.Checked;
+
                 var tasks = targets.Select(async address =>
                 {
                     await tracerouteSemaphore.WaitAsync(tracerouteCts.Token);
                     try
                     {
                         // サービスの呼び出し (コールバックでUI更新)
-                        await _tracerouteService.RunTracerouteAsync(address, timeout, tracerouteCts.Token, (text) =>
+                        // noResolve オプションを渡す
+                        await _tracerouteService.RunTracerouteAsync(address, timeout, noResolve, tracerouteCts.Token, (text) =>
                         {
                             AppendTracerouteOutput(address, text, false);
                         });
@@ -632,7 +635,6 @@ namespace Pings
             }
         }
 
-        // C#
         private void UpdateTracerouteButtons()
         {
             if (btnTraceroute == null) return;
@@ -1016,10 +1018,11 @@ namespace Pings
             mnuAutoSaveTraceroute.CheckedChanged += (s, e) => UpdateTracerouteButtons();
             opt.DropDownItems.Add(mnuAutoSaveTraceroute);
 
-            // ★追加: 区切り線と新オプション
+            // ★追加: 区切り線
             opt.DropDownItems.Add(new ToolStripSeparator());
 
-            mnuShowJitter1 = new ToolStripMenuItem("ジッタ①（最大値‐最小値）を表示させる") { CheckOnClick = true, Checked = false };
+            // ★変更: デフォルトを ON に変更
+            mnuShowJitter1 = new ToolStripMenuItem("ジッタ①（最大値‐最小値）を表示させる") { CheckOnClick = true, Checked = true };
             mnuShowJitter1.CheckedChanged += (s, e) => UpdateColumnVisibility();
             opt.DropDownItems.Add(mnuShowJitter1);
 
@@ -1030,6 +1033,11 @@ namespace Pings
             mnuShowStdDev = new ToolStripMenuItem("Pingの標準偏差を表示する") { CheckOnClick = true, Checked = false };
             mnuShowStdDev.CheckedChanged += (s, e) => UpdateColumnVisibility();
             opt.DropDownItems.Add(mnuShowStdDev);
+
+            // ★追加: 区切り線とTraceroute名前解決オプション（デフォルト ON）
+            opt.DropDownItems.Add(new ToolStripSeparator());
+            mnuTracerouteNoResolve = new ToolStripMenuItem("tracerouteで名前解決を行わない") { CheckOnClick = true, Checked = true };
+            opt.DropDownItems.Add(mnuTracerouteNoResolve);
 
             ms.Items.Add(opt);
 
@@ -1085,19 +1093,21 @@ namespace Pings
             dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "失敗回数", HeaderText = "失敗回数", Width = 80 });
             dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "失敗時間mmss", HeaderText = "失敗時間", Width = 100 });
 
-            // Down前
+            // Down前（基本統計）
             dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Down前平均ms", HeaderText = "Down前平均", Width = 110, DefaultCellStyle = new DataGridViewCellStyle { Format = "F1" } });
             dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Down前最小ms", HeaderText = "Down前最小", Width = 110 });
             dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Down前最大ms", HeaderText = "Down前最大", Width = 110 });
+
+            // 復旧後（基本統計）
+            dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "復旧後平均ms", HeaderText = "復旧後平均", Width = 110, DefaultCellStyle = new DataGridViewCellStyle { Format = "F1" } });
+            dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "復旧後最小ms", HeaderText = "復旧後最小", Width = 110 });
+            dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "復旧後最大ms", HeaderText = "復旧後復旧後最大", Width = 110 });
+
             // ★追加: 拡張統計 (Down前)
             dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Down前Jitter1", Name = "colLogJitter1_Pre", HeaderText = "Down前ジッタ①", Width = 100, Visible = false });
             dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Down前Jitter2", Name = "colLogJitter2_Pre", HeaderText = "Down前ジッタ②", Width = 100, DefaultCellStyle = new DataGridViewCellStyle { Format = "F1" }, Visible = false });
             dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Down前StdDev", Name = "colLogStdDev_Pre", HeaderText = "Down前標準偏差", Width = 100, DefaultCellStyle = new DataGridViewCellStyle { Format = "F2" }, Visible = false });
 
-            // 復旧後
-            dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "復旧後平均ms", HeaderText = "復旧後平均", Width = 110, DefaultCellStyle = new DataGridViewCellStyle { Format = "F1" } });
-            dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "復旧後最小ms", HeaderText = "復旧後最小", Width = 110 });
-            dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "復旧後最大ms", HeaderText = "復旧後最大", Width = 110 });
             // ★追加: 拡張統計 (復旧後)
             dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "復旧後Jitter1", Name = "colLogJitter1_Post", HeaderText = "復旧後ジッタ①", Width = 100, Visible = false });
             dgvLog.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "復旧後Jitter2", Name = "colLogJitter2_Post", HeaderText = "復旧後ジッタ②", Width = 100, DefaultCellStyle = new DataGridViewCellStyle { Format = "F1" }, Visible = false });
