@@ -61,6 +61,10 @@ namespace Pings.Services
                 {
                     if (item.ContinuousDownStartTime.HasValue)
                     {
+                        // 復旧回数をインクリメントしてステータスに回数表示（例: "復旧_1"）
+                        item.TotalRecoveryCount++;
+                        item.ステータス = $"復旧_{item.TotalRecoveryCount}";
+
                         TimeSpan duration = DateTime.Now - item.ContinuousDownStartTime.Value;
 
                         DisruptionLogItem newLogItem = new DisruptionLogItem
@@ -94,15 +98,15 @@ namespace Pings.Services
                         item.ActiveLogItem = newLogItem;
                     }
 
-                    // 統計リセット
+                    // 統計リセット（復旧検知後、次の成功連続カウントを0から開始）
                     item.CurrentSessionUpTimeMs = 0;
                     item.CurrentSessionSuccessCount = 0;
                     item.CurrentSessionMin = 0;
                     item.CurrentSessionMax = 0;
 
-                    // ★追加: 拡張統計リセット
+                    // 拡張統計リセット
                     item.CurrentSessionSumSquares = 0;
-                    item.PreviousRtt = -1; // 復旧直後はパケットペアがない状態にする
+                    item.PreviousRtt = -1;
                     item.JitterDiffSum = 0;
                     item.JitterDiffCount = 0;
                     item.Jitter1_MaxMin = 0;
@@ -119,18 +123,17 @@ namespace Pings.Services
                 item.連続失敗回数 = 0;
                 item.連続失敗時間s = "";
                 item.ContinuousDownStartTime = null;
-                item.ステータス = item.HasBeenDown ? "復旧" : "OK";
 
+                // 成功カウントを進める（復旧判定後の安定化表示に利用）
                 item.CurrentSessionSuccessCount++;
                 item.CurrentSessionUpTimeMs += rtt;
-                item.CurrentSessionSumSquares += (rtt * rtt); // 二乗和加算
+                item.CurrentSessionSumSquares += (rtt * rtt);
 
                 // 最小・最大更新
                 if (item.CurrentSessionSuccessCount == 1)
                 {
                     item.CurrentSessionMin = rtt;
                     item.CurrentSessionMax = rtt;
-                    // 1回目なのでJitter2(差分)は計算できない
                 }
                 else
                 {
@@ -138,7 +141,6 @@ namespace Pings.Services
                     if (rtt > item.CurrentSessionMax) item.CurrentSessionMax = rtt;
 
                     // Jitter2 (Packet Pair) 計算
-                    // 前回のRTTが有効(=成功していた)場合のみ計算
                     if (item.PreviousRtt >= 0)
                     {
                         long diff = Math.Abs(rtt - item.PreviousRtt);
@@ -160,10 +162,8 @@ namespace Pings.Services
                 // 標準偏差 計算 (Population StdDev)
                 if (item.CurrentSessionSuccessCount > 0)
                 {
-                    // 分散 = (二乗和 / N) - (平均^2)
                     double mean = item.平均値ms;
                     double variance = (item.CurrentSessionSumSquares / item.CurrentSessionSuccessCount) - (mean * mean);
-                    // 浮動小数点の誤差でマイナスになるのを防ぐ
                     item.StdDev = Math.Sqrt(Math.Max(0, variance));
                 }
                 else
@@ -185,19 +185,33 @@ namespace Pings.Services
                     item.ActiveLogItem.復旧後Jitter2 = item.Jitter2_PktPair;
                     item.ActiveLogItem.復旧後StdDev = item.StdDev;
                 }
+
+                // ステータスの初期値が空文字列の場合、最初の成功で OK にする
+                var currentStatus = item.ステータス ?? "";
+                if (string.IsNullOrEmpty(currentStatus))
+                {
+                    item.ステータス = "OK";
+                }
+
+                // HasBeenDown フラグは成功で解除
+                item.HasBeenDown = false;
             }
             else
             {
                 // ========== 失敗時 ==========
                 if (!item.IsCurrentlyDown)
                 {
+                    // Down回数のインクリメントとステータス表示（例: "Down_1"）
+                    item.TotalDownCount++;
+                    item.ステータス = $"Down_{item.TotalDownCount}";
+
                     // Down開始時点のスナップショットを保存
                     item.ActiveLogItem = null;
                     item.SnapAvg = item.平均値ms;
                     item.SnapMin = item.最小値ms;
                     item.SnapMax = item.最大値ms;
 
-                    // ★追加: 拡張統計スナップショット
+                    // 拡張統計スナップショット
                     item.SnapJitter1 = item.Jitter1_MaxMin;
                     item.SnapJitter2 = item.Jitter2_PktPair;
                     item.SnapStdDev = item.StdDev;
@@ -210,7 +224,6 @@ namespace Pings.Services
                 item.失敗回数++;
                 item.CurrentDisruptionFailureCount++;
                 item.時間ms = 0;
-                item.ステータス = "Down";
                 item.IsUp = false;
                 item.HasBeenDown = true;
                 item.連続失敗回数++;
