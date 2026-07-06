@@ -23,10 +23,10 @@ namespace Pings.Repositories
         {
             using (StreamWriter sw = new StreamWriter(filePath, false, _encoding))
             {
-                sw.WriteLine("対象アドレス,Host名");
+                sw.WriteLine($"{Csv("対象アドレス")},{Csv("Host名")}");
                 foreach (var item in items.Where(i => !string.IsNullOrEmpty(i.対象アドレス) || !string.IsNullOrEmpty(i.Host名)))
                 {
-                    sw.WriteLine($"{item.対象アドレス},{item.Host名}");
+                    sw.WriteLine($"{Csv(item.対象アドレス)},{Csv(item.Host名)}");
                 }
             }
         }
@@ -52,7 +52,7 @@ namespace Pings.Repositories
             bool isSavedCsvFormat = false;
             if (allLines.Any())
             {
-                string headerCandidate = allLines[0].Trim().Replace(" ", "");
+                string headerCandidate = allLines[0].Trim().Replace(" ", "").Replace("\"", "");
                 if (headerCandidate.Equals("対象アドレス,Host名", StringComparison.OrdinalIgnoreCase))
                 {
                     allLines.RemoveAt(0);
@@ -72,8 +72,8 @@ namespace Pings.Repositories
                 if (isSavedCsvFormat)
                 {
                     string[] parts = currentLine.Split(new[] { ',' }, 2).Select(p => p.Trim()).ToArray();
-                    address = parts[0];
-                    hostName = parts.Length > 1 ? parts[1] : "";
+                    address = Unquote(parts[0]);
+                    hostName = parts.Length > 1 ? Unquote(parts[1]) : "";
                 }
                 else
                 {
@@ -96,8 +96,8 @@ namespace Pings.Repositories
                     else if (currentLine.Contains(','))
                     {
                         string[] parts = currentLine.Split(new[] { ',' }, 2).Select(p => p.Trim()).ToArray();
-                        address = parts[0];
-                        hostName = parts.Length > 1 ? parts[1] : "";
+                        address = Unquote(parts[0]);
+                        hostName = parts.Length > 1 ? Unquote(parts[1]) : "";
                     }
                     else
                     {
@@ -142,15 +142,15 @@ namespace Pings.Repositories
                 foreach (var item in monitors.OrderBy(i => i.順番))
                 {
                     string line = string.Join(",",
-                        item.ステータス,
+                        Csv(item.ステータス),
                         item.順番,
-                        item.対象アドレス,
-                        item.Host名,
+                        Csv(item.対象アドレス),
+                        Csv(item.Host名),
                         item.送信回数,
                         item.失敗回数,
                         item.連続失敗回数,
-                        item.連続失敗時間s,
-                        item.最大失敗時間s,
+                        Csv(item.連続失敗時間s),
+                        Csv(item.最大失敗時間s),
                         item.時間ms,
                         $"{item.平均値ms:F1}",
                         item.最小値ms,
@@ -179,12 +179,12 @@ namespace Pings.Repositories
                     foreach (var logItem in logs.OrderBy(i => i.復旧日時))
                     {
                         string logLine = string.Join(",",
-                            logItem.対象アドレス,
-                            logItem.Host名,
-                            logItem.Down開始日時.ToString("yyyy/MM/dd HH:mm:ss"),
-                            logItem.復旧日時.ToString("yyyy/MM/dd HH:mm:ss"),
+                            Csv(logItem.対象アドレス),
+                            Csv(logItem.Host名),
+                            Csv(logItem.Down開始日時.ToString("yyyy/MM/dd HH:mm:ss")),
+                            Csv(logItem.復旧日時.ToString("yyyy/MM/dd HH:mm:ss")),
                             logItem.失敗回数,
-                            logItem.失敗時間mmss,
+                            Csv(logItem.失敗時間mmss),
                             // Down前 基本統計
                             $"{logItem.Down前平均ms:F1}",
                             logItem.Down前最小ms,
@@ -232,6 +232,19 @@ namespace Pings.Repositories
                 sw.WriteLine(content);
                 sw.WriteLine();
             }
+        }
+
+        private string Csv(string value)
+        {
+            if (value == null) return "\"\"";
+            return "\"" + value.Replace("\"", "\"\"") + "\"";
+        }
+
+        private static string Unquote(string s)
+        {
+            if (s.Length >= 2 && s[0] == '"' && s[s.Length - 1] == '"')
+                return s.Substring(1, s.Length - 2).Replace("\"\"", "\"");
+            return s;
         }
 
         public string SanitizeFileName(string name)
