@@ -42,7 +42,14 @@ namespace Pings
         private ComboBox cmbInterval, cmbTimeout;
         private Button btnPingStart, btnStop, btnClear, btnSave, btnExit;
         private TabControl tabControl;
+        private TabPage statsPage;
         private TabPage traceroutePage;
+
+        // ステータスボード関連
+        private TabPage statusBoardPage;
+        private Panel statusBoardHost;
+        private FlowLayoutPanel statusBoardFlow;
+        private Label lblBoardTotal, lblBoardOk, lblBoardDown, lblBoardRecovery;
         private TableLayoutPanel traceroutePanel;
         private Button btnTraceroute, btnSaveTraceroute, btnClearTraceroute, btnStopTraceroute;
         private ToolStripMenuItem mnuAutoSaveAllPing, mnuAutoSaveTraceroute;
@@ -72,6 +79,8 @@ namespace Pings
         private const int TracerouteColumnWidth = 480;
         private ConcurrentDictionary<string, bool> _tracerouteCompletion;
         private ConcurrentDictionary<string, bool> _tracerouteStoppedByUser;
+        // 出力有無のフラグ（全テキストボックス走査を避けるため）
+        private volatile bool _tracerouteHasOutput = false;
 
         // ソート状態
         private DataGridViewColumn currentSortColumn = null;

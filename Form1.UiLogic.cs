@@ -27,6 +27,7 @@ namespace Pings
             UpdateUiState(UiState.Running);
             uiUpdateTimer.Start();
             ResetLogSortIndicators();
+            BuildStatusBoard();
 
             foreach (var item in monitorList.Where(i => !string.IsNullOrEmpty(i.対象アドレス) && i.順番 > 0))
             {
@@ -81,7 +82,9 @@ namespace Pings
             {
                 tracerouteTextBoxes.Clear();
                 traceroutePanel.Controls.Clear();
+                _tracerouteHasOutput = false;
             }
+            ClearStatusBoard();
         }
 
         // ====================================================================
@@ -167,7 +170,7 @@ namespace Pings
             bool hasChecked = monitorList?.Any(i => i.Trace && !string.IsNullOrWhiteSpace(i.対象アドレス)) ?? false;
             btnTraceroute.Enabled = hasChecked && !_isTracerouteRunning;
 
-            bool hasOutput = tracerouteTextBoxes != null && tracerouteTextBoxes.Values.Any(t => !string.IsNullOrEmpty(t.Text));
+            bool hasOutput = _tracerouteHasOutput;
             bool autoSave = mnuAutoSaveTraceroute?.Checked ?? false;
 
             btnSaveTraceroute.Enabled = !_isTracerouteRunning && hasOutput && !autoSave;
@@ -193,6 +196,7 @@ namespace Pings
         {
             if (dgvMonitor != null && dgvMonitor.IsHandleCreated) dgvMonitor.Refresh();
             if (dgvLog != null && dgvLog.IsHandleCreated) dgvLog.Refresh();
+            UpdateStatusBoard();
         }
 
         private void RecalculateOrderNumbers()
@@ -202,9 +206,18 @@ namespace Pings
             try
             {
                 monitorList.ListChanged -= MonitorList_ListChanged;
-                for (int i = 0; i < monitorList.Count; i++) monitorList[i].順番 = i + 1;
+                bool changed = false;
+                for (int i = 0; i < monitorList.Count; i++)
+                {
+                    if (monitorList[i].順番 != i + 1)
+                    {
+                        monitorList[i].順番 = i + 1;
+                        changed = true;
+                    }
+                }
                 _nextIndex = monitorList.Count + 1;
-                monitorList.ResetBindings();
+                // ResetBindings は選択状態を消すため、番号が実際に変わったときだけ実行する
+                if (changed) monitorList.ResetBindings();
                 monitorList.ListChanged += MonitorList_ListChanged;
             }
             finally

@@ -52,7 +52,7 @@ namespace Pings.Repositories
             bool isSavedCsvFormat = false;
             if (allLines.Any())
             {
-                string headerCandidate = allLines[0].Trim().Replace(" ", "");
+                string headerCandidate = allLines[0].Trim().Replace(" ", "").Replace("\"", "");
                 if (headerCandidate.Equals("対象アドレス,Host名", StringComparison.OrdinalIgnoreCase))
                 {
                     allLines.RemoveAt(0);
@@ -72,8 +72,8 @@ namespace Pings.Repositories
                 if (isSavedCsvFormat)
                 {
                     string[] parts = currentLine.Split(new[] { ',' }, 2).Select(p => p.Trim()).ToArray();
-                    address = parts[0];
-                    hostName = parts.Length > 1 ? parts[1] : "";
+                    address = Unquote(parts[0]);
+                    hostName = parts.Length > 1 ? Unquote(parts[1]) : "";
                 }
                 else
                 {
@@ -96,8 +96,8 @@ namespace Pings.Repositories
                     else if (currentLine.Contains(','))
                     {
                         string[] parts = currentLine.Split(new[] { ',' }, 2).Select(p => p.Trim()).ToArray();
-                        address = parts[0];
-                        hostName = parts.Length > 1 ? parts[1] : "";
+                        address = Unquote(parts[0]);
+                        hostName = parts.Length > 1 ? Unquote(parts[1]) : "";
                     }
                     else
                     {
@@ -238,6 +238,13 @@ namespace Pings.Repositories
         {
             if (value == null) return "\"\"";
             return "\"" + value.Replace("\"", "\"\"") + "\"";
+        }
+
+        private static string Unquote(string s)
+        {
+            if (s.Length >= 2 && s[0] == '"' && s[s.Length - 1] == '"')
+                return s.Substring(1, s.Length - 2).Replace("\"\"", "\"");
+            return s;
         }
 
         public string SanitizeFileName(string name)

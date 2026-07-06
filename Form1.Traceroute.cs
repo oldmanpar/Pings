@@ -125,6 +125,7 @@ namespace Pings
                     _repository.SaveTracerouteResult(folder, kv.Key, host, kv.Value.Text);
                     kv.Value.Clear();
                 }
+                _tracerouteHasOutput = false;
                 MessageBox.Show("保存しました。", "完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
@@ -139,6 +140,7 @@ namespace Pings
             if (tracerouteTextBoxes != null)
             {
                 foreach (var tb in tracerouteTextBoxes.Values) tb.Clear();
+                _tracerouteHasOutput = false;
                 UpdateTracerouteButtons();
             }
         }
@@ -154,32 +156,42 @@ namespace Pings
 
             if (!reuse)
             {
-                tracerouteTextBoxes.Clear();
-                traceroutePanel.Controls.Clear();
-                traceroutePanel.ColumnCount = Math.Max(1, targets.Count);
-                traceroutePanel.RowCount = 1;
-                traceroutePanel.ColumnStyles.Clear();
-                for (int i = 0; i < traceroutePanel.ColumnCount; i++)
-                    traceroutePanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, TracerouteColumnWidth));
-
-                for (int i = 0; i < targets.Count; i++)
+                // 多拠点時のレイアウト再計算を止めてから一括構築する
+                traceroutePanel.SuspendLayout();
+                try
                 {
-                    string address = targets[i];
-                    string hostName = monitorList.FirstOrDefault(m => m.対象アドレス == address)?.Host名 ?? "";
+                    tracerouteTextBoxes.Clear();
+                    traceroutePanel.Controls.Clear();
+                    _tracerouteHasOutput = false;
+                    traceroutePanel.ColumnCount = Math.Max(1, targets.Count);
+                    traceroutePanel.RowCount = 1;
+                    traceroutePanel.ColumnStyles.Clear();
+                    for (int i = 0; i < traceroutePanel.ColumnCount; i++)
+                        traceroutePanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, TracerouteColumnWidth));
 
-                    var container = new Panel { Dock = DockStyle.Fill, Padding = new Padding(2), Width = TracerouteColumnWidth };
-                    var lbl = new Label { Text = $"{address}_{hostName}", Dock = DockStyle.Top, Height = 18, AutoEllipsis = true };
-                    var tb = new TextBox
+                    for (int i = 0; i < targets.Count; i++)
                     {
-                        Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Both,
-                        WordWrap = false, Dock = DockStyle.Fill, BackColor = System.Drawing.SystemColors.Window,
-                        Font = new Font(FontFamily.GenericMonospace, 9f)
-                    };
+                        string address = targets[i];
+                        string hostName = monitorList.FirstOrDefault(m => m.対象アドレス == address)?.Host名 ?? "";
 
-                    container.Controls.Add(tb);
-                    container.Controls.Add(lbl);
-                    traceroutePanel.Controls.Add(container, i, 0);
-                    tracerouteTextBoxes[address] = tb;
+                        var container = new Panel { Dock = DockStyle.Fill, Padding = new Padding(2), Width = TracerouteColumnWidth };
+                        var lbl = new Label { Text = $"{address}_{hostName}", Dock = DockStyle.Top, Height = 18, AutoEllipsis = true };
+                        var tb = new TextBox
+                        {
+                            Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Both,
+                            WordWrap = false, Dock = DockStyle.Fill, BackColor = System.Drawing.SystemColors.Window,
+                            Font = new Font(FontFamily.GenericMonospace, 9f)
+                        };
+
+                        container.Controls.Add(tb);
+                        container.Controls.Add(lbl);
+                        traceroutePanel.Controls.Add(container, i, 0);
+                        tracerouteTextBoxes[address] = tb;
+                    }
+                }
+                finally
+                {
+                    traceroutePanel.ResumeLayout(true);
                 }
             }
         }
@@ -213,14 +225,16 @@ namespace Pings
             if (tracerouteTextBoxes != null && tracerouteTextBoxes.ContainsKey(address))
             {
                 var tb = tracerouteTextBoxes[address];
+                _tracerouteHasOutput = true;
+                // BeginInvoke: ワーカースレッドをUIの応答待ちでブロックしない。
+                // ボタン更新は毎行行わず、開始・終了時にまとめて行う
                 if (tb.InvokeRequired)
-                    tb.Invoke(new Action(() => { tb.AppendText(text); tb.ScrollToCaret(); }));
+                    tb.BeginInvoke(new Action(() => { tb.AppendText(text); tb.ScrollToCaret(); }));
                 else
                 {
                     tb.AppendText(text);
                     tb.ScrollToCaret();
                 }
-                UpdateTracerouteButtons();
             }
         }
 

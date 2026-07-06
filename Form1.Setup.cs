@@ -34,7 +34,7 @@ namespace Pings
             Label lblInterval = new Label { Text = "送信間隔 [ms]", Location = new Point(350, 5), AutoSize = true };
             cmbInterval = new ComboBox { Location = new Point(350, 23), Width = 60, DropDownStyle = ComboBoxStyle.DropDownList };
             cmbInterval.Items.AddRange(new object[] { "100", "500", "1000", "2000" });
-            cmbInterval.SelectedIndex = 2;
+            cmbInterval.SelectedIndex = 3; // 初期値 2000ms（多拠点監視を想定）
 
             Label lblTimeout = new Label { Text = "タイムアウト [ms]", Location = new Point(480, 5), AutoSize = true };
             cmbTimeout = new ComboBox { Location = new Point(480, 23), Width = 60, DropDownStyle = ComboBoxStyle.DropDownList };
@@ -54,7 +54,7 @@ namespace Pings
             tabControl = new TabControl { Dock = DockStyle.Fill };
 
             // 監視統計タブ
-            TabPage statsPage = new TabPage("監視統計");
+            statsPage = new TabPage("監視統計");
             dgvMonitor = new DataGridView
             {
                 Dock = DockStyle.Fill,
@@ -102,6 +102,9 @@ namespace Pings
             };
             traceroutePage.Controls.Add(traceroutePanel);
             tabControl.Controls.Add(traceroutePage);
+
+            // ステータスボードタブ（多拠点の一括確認用）
+            tabControl.Controls.Add(CreateStatusBoardTab());
 
             contentPanel.Controls.Add(tabControl);
             contentPanel.Controls.Add(topPanel);

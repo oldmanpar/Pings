@@ -85,6 +85,9 @@
     <Compile Include="Form1.Setup.cs">
       <DependentUpon>Form1.cs</DependentUpon>
     </Compile>
+    <Compile Include="Form1.StatusBoard.cs">
+      <DependentUpon>Form1.cs</DependentUpon>
+    </Compile>
     <Compile Include="PingTerminalForm.cs">
       <SubType>Form</SubType>
     </Compile>
