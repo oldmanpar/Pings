@@ -176,6 +176,20 @@ namespace Pings
             using (var ab = new AboutBox()) ab.ShowDialog(this);
         }
 
+        private void HelpUsageItem_Click(object sender, EventArgs e)
+        {
+            // モードレスで単一インスタンス表示（既に開いていれば前面へ）
+            if (helpForm == null || helpForm.IsDisposed)
+            {
+                helpForm = new HelpForm();
+                helpForm.Show(this);
+            }
+            else
+            {
+                helpForm.Activate();
+            }
+        }
+
         // ====================================================================
         // DataGridView イベント
         // ====================================================================

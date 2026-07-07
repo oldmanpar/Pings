@@ -60,6 +60,9 @@ namespace Pings
         private ComboBox cmbInterface;
         private Button btnRefreshInterfaces;
 
+        // 操作方法ウィンドウ（モードレス・単一インスタンス）
+        private HelpForm helpForm;
+
         // -------------------------
         // 状態管理フィールド
         // -------------------------
