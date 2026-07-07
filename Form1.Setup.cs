@@ -220,6 +220,8 @@ namespace Pings
             ms.Items.Add(opt);
 
             var help = new ToolStripMenuItem("ヘルプ");
+            help.DropDownItems.Add("操作方法", null, HelpUsageItem_Click);
+            help.DropDownItems.Add(new ToolStripSeparator());
             help.DropDownItems.Add("バージョン情報", null, VersionItem_Click);
             ms.Items.Add(help);
 
