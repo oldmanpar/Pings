@@ -111,12 +111,27 @@ namespace Pings
                     Margin = new Padding(2),
                     BackColor = SystemColors.Control
                 };
-                // 順番・IPアドレス・Host名は監視中に変わらないため1ラベルにまとめる
+                // 列幅を固定してアドレス・Host名の開始位置を全チップで揃える
+                // | 順番(22) | 対象アドレス(102) | Host名(47) | RTT/状態(50) |
+                var lblNum = new Label
+                {
+                    Text = item.順番.ToString(),
+                    Location = new Point(3, 3),
+                    Size = new Size(22, 16),
+                    TextAlign = ContentAlignment.MiddleRight
+                };
+                var lblAddr = new Label
+                {
+                    Text = item.対象アドレス,
+                    Location = new Point(27, 3),
+                    Size = new Size(102, 16),
+                    AutoEllipsis = true
+                };
                 chip.Name = new Label
                 {
-                    Text = $"{item.順番} {item.対象アドレス} {item.Host名}",
-                    Location = new Point(3, 3),
-                    Size = new Size(178, 16),
+                    Text = item.Host名,
+                    Location = new Point(131, 3),
+                    Size = new Size(47, 16),
                     AutoEllipsis = true
                 };
                 chip.Value = new Label
@@ -126,12 +141,16 @@ namespace Pings
                     Size = new Size(50, 16),
                     TextAlign = ContentAlignment.MiddleRight
                 };
+                chip.Panel.Controls.Add(lblNum);
+                chip.Panel.Controls.Add(lblAddr);
                 chip.Panel.Controls.Add(chip.Name);
                 chip.Panel.Controls.Add(chip.Value);
 
                 // ダブルクリックで監視統計タブの該当行へ移動
                 var target = item;
                 chip.Panel.DoubleClick += (s, e) => NavigateToMonitorRow(target);
+                lblNum.DoubleClick     += (s, e) => NavigateToMonitorRow(target);
+                lblAddr.DoubleClick    += (s, e) => NavigateToMonitorRow(target);
                 chip.Name.DoubleClick  += (s, e) => NavigateToMonitorRow(target);
                 chip.Value.DoubleClick += (s, e) => NavigateToMonitorRow(target);
 
